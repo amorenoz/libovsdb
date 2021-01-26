@@ -79,10 +79,37 @@ type TableUpdate struct {
 	Rows map[string]RowUpdate `json:"rows,overflow"`
 }
 
-// RowUpdate represents a row update according to RFC7047
+// NewTableUpdate creates a native table update from an OvsRowUpdate
+// and a table schema
+func NewTableUpdate(ovsUpdate map[string]OvsRowUpdate, table *TableSchema) (*TableUpdate, error) {
+	update := TableUpdate{}
+	for key, ovsRowUpdate := range ovsUpdate {
+		newNative, err := ovsRowUpdate.New.Data(table)
+		if err != nil {
+			return nil, err
+		}
+		oldNative, err := ovsRowUpdate.Old.Data(table)
+		if err != nil {
+			return nil, err
+		}
+		update.Rows[key] = RowUpdate{
+			New: *newNative,
+			Old: *oldNative,
+		}
+	}
+	return &update, nil
+}
+
+// RowUpdate represents a row update without ovs-specific format
 type RowUpdate struct {
-	New Row `json:"new,omitempty"`
-	Old Row `json:"old,omitempty"`
+	New Row
+	Old Row
+}
+
+// OvsRowUpdate represents a row update according to RFC7047
+type OvsRowUpdate struct {
+	New OvsRow `json:"new,omitempty"`
+	Old OvsRow `json:"old,omitempty"`
 }
 
 // OvsdbError is an OVS Error Condition
@@ -109,11 +136,11 @@ type TransactResponse struct {
 
 // OperationResult is the result of an Operation
 type OperationResult struct {
-	Count   int         `json:"count,omitempty"`
-	Error   string      `json:"error,omitempty"`
-	Details string      `json:"details,omitempty"`
-	UUID    UUID        `json:"uuid,omitempty"`
-	Rows    []ResultRow `json:"rows,omitempty"`
+	Count   int            `json:"count,omitempty"`
+	Error   string         `json:"error,omitempty"`
+	Details string         `json:"details,omitempty"`
+	UUID    UUID           `json:"uuid,omitempty"`
+	Rows    []OvsResultRow `json:"rows,omitempty"`
 }
 
 func ovsSliceToGoNotation(val interface{}) (interface{}, error) {

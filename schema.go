@@ -127,6 +127,85 @@ func (column *ColumnSchema) nativeTypeFromExtended(extended ExtendedType) (refle
 	}
 }
 
+// OvsToNative transforms an ovs native to native one based on the column type information
+func (column *ColumnSchema) OvsToNative(ovsElem interface{}) (interface{}, error) {
+	naType, err := column.NativeType()
+	if err != nil {
+		return nil, err
+	}
+	if t := reflect.TypeOf(ovsElem); t != naType {
+		return nil, fmt.Errorf("Bad Type in column %s: expected %s, got %s",
+			column.Name, naType.String(), t.String())
+	}
+	switch column.Type {
+	case TypeInteger, TypeReal, TypeString, TypeBoolean:
+		return ovsElem, nil
+	case TypeUUID:
+		uuid := ovsElem.(UUID)
+		return uuid.GoUUID, nil
+	case TypeSet:
+		ovsSet := ovsElem.(OvsSet)
+		var nativeSet []interface{}
+		if column.TypeObj.Key.Type == TypeUUID {
+			for _, v := range ovsSet.GoSet {
+				uuid := v.(UUID)
+				nativeSet = append(nativeSet, uuid.GoUUID)
+			}
+		} else {
+			nativeSet = ovsSet.GoSet
+		}
+		return nativeSet, nil
+	case TypeMap:
+		ovsMap := ovsElem.(OvsMap)
+		return ovsMap.GoMap, nil
+	}
+
+	return nil, fmt.Errorf("Unsuppored type")
+}
+
+// NativeToOvs transforms an native type to a ovs type based on the column type information
+func (column *ColumnSchema) NativeToOvs(rawElem interface{}) (interface{}, error) {
+	// Type Validation
+	naType, err := column.NativeType()
+	if err != nil {
+		return nil, err
+	}
+	if t := reflect.TypeOf(rawElem); t != naType {
+		return nil, fmt.Errorf("Bad Type in column %s: expected %s, got %s",
+			column.Name, naType.String(), t.String())
+	}
+	switch column.Type {
+	case TypeInteger, TypeReal, TypeString, TypeBoolean:
+		return rawElem, nil
+	case TypeUUID:
+		return UUID{GoUUID: rawElem.(string)}, nil
+	case TypeSet:
+		var ovsSet *OvsSet
+		if column.TypeObj.Key.Type == TypeUUID {
+			var ovsSlice []interface{}
+			for _, v := range rawElem.([]string) {
+				uuid := UUID{GoUUID: v}
+				ovsSlice = append(ovsSlice, uuid)
+			}
+			ovsSet = &OvsSet{GoSet: ovsSlice}
+
+		} else {
+			ovsSet, err = NewOvsSet(rawElem)
+			if err != nil {
+				return nil, err
+			}
+		}
+		return *ovsSet, nil
+	case TypeMap:
+		ovsMap, err := NewOvsMap(rawElem)
+		if err != nil {
+			return nil, err
+		}
+		return *ovsMap, nil
+	}
+	return nil, fmt.Errorf("Unsuppored type")
+}
+
 //NativeType returns the reflect.Type that can hold the value of a column
 //OVS Type to Native Type convertions:
 // OVS sets -> go slices
@@ -166,7 +245,10 @@ func (column *ColumnSchema) TypeString() string {
 	case TypeInteger, TypeReal, TypeBoolean, TypeString:
 		return string(column.Type)
 	case TypeUUID:
-		return fmt.Sprintf("uuid [%s (%s)]", column.TypeObj.Key.RefTable, column.TypeObj.Key.RefType)
+		if column.TypeObj != nil {
+			return fmt.Sprintf("uuid [%s (%s)]", column.TypeObj.Key.RefTable, column.TypeObj.Key.RefType)
+		}
+		return fmt.Sprintf("uuid")
 	case TypeEnum:
 		return fmt.Sprintf("enum (type: %s): %v", column.TypeObj.Key.Type, column.TypeObj.Key.Enum)
 	case TypeMap:
@@ -237,6 +319,11 @@ func (column *ColumnSchema) Unmarshal() error {
 		return nil
 	}
 
+	// If either Min or Max are provided, it's a Set
+	if column.TypeObj.Min != 1 || column.TypeObj.Max != 1 {
+		column.Type = TypeSet
+	}
+
 	// Try to parse key.Enum
 	if column.TypeObj.Key.EnumMsg != nil {
 
@@ -244,13 +331,8 @@ func (column *ColumnSchema) Unmarshal() error {
 			return nil
 		}
 		column.Type = TypeEnum
-		return nil
-	}
-
-	if column.TypeObj.Min == 1 && column.TypeObj.Max == 1 {
+	} else {
 		column.Type = column.TypeObj.Key.Type
-	} else if column.TypeObj.Min != 1 || column.TypeObj.Max != 1 {
-		column.Type = TypeSet
 	}
 
 	return nil
@@ -266,13 +348,20 @@ func (schema *DatabaseSchema) Unmarshal(jsonBytes []byte) error {
 
 	// 2. Unmarshal column schemas
 	for _, table := range schema.Tables {
-		for _, column := range table.Columns {
+		for name, column := range table.Columns {
 			if err := column.Unmarshal(); err != nil {
 				return err
 			}
+			column.Name = name
 		}
+		table.Columns["_uuid"] = &uuidColumn
 	}
 	return nil
+}
+
+var uuidColumn = ColumnSchema{
+	Name: "_uuid",
+	Type: TypeUUID,
 }
 
 // Print will print the contents of the DatabaseSchema
@@ -281,7 +370,7 @@ func (schema *DatabaseSchema) Print(w io.Writer) {
 	for table, tableSchema := range schema.Tables {
 		fmt.Fprintf(w, "\t %s\n", table)
 		for column, columnSchema := range tableSchema.Columns {
-			fmt.Fprintf(w, "\t\t %s => %s\n", column, columnSchema.TypeString())
+			fmt.Fprintf(w, "\t\t %s %s => %s\n", column, columnSchema.Name, columnSchema.TypeString())
 		}
 	}
 }

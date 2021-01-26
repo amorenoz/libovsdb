@@ -197,7 +197,7 @@ func update(client *rpc2.Client, params []interface{}, _ *interface{}) error {
 	if !ok {
 		return errors.New("Invalid Update message")
 	}
-	var rowUpdates map[string]map[string]RowUpdate
+	var rowUpdates map[string]map[string]OvsRowUpdate
 
 	b, err := json.Marshal(raw)
 	if err != nil {
@@ -209,14 +209,15 @@ func update(client *rpc2.Client, params []interface{}, _ *interface{}) error {
 	}
 
 	// Update the local DB cache with the tableUpdates
-	tableUpdates := getTableUpdatesFromRawUnmarshal(rowUpdates)
+	// TODO: add schema
+	tableUpdates, err := getTableUpdatesFromRawUnmarshal(rowUpdates, nil)
 	connectionsMutex.RLock()
 	defer connectionsMutex.RUnlock()
 	if _, ok := connections[client]; ok {
 		connections[client].handlersMutex.Lock()
 		defer connections[client].handlersMutex.Unlock()
 		for _, handler := range connections[client].handlers {
-			handler.Update(params[0], tableUpdates)
+			handler.Update(params[0], *tableUpdates)
 		}
 	}
 
@@ -317,28 +318,41 @@ func (ovs OvsdbClient) MonitorCancel(jsonContext interface{}) error {
 // Monitor will provide updates for a given table/column
 // RFC 7047 : monitor
 func (ovs OvsdbClient) Monitor(database string, jsonContext interface{}, requests map[string]MonitorRequest) (*TableUpdates, error) {
-	var reply TableUpdates
+	var reply *TableUpdates
 
 	args := NewMonitorArgs(database, jsonContext, requests)
 
 	// This totally sucks. Refer to golang JSON issue #6213
-	var response map[string]map[string]RowUpdate
+	var response map[string]map[string]OvsRowUpdate
 	err := ovs.rpcClient.Call("monitor", args, &response)
-	reply = getTableUpdatesFromRawUnmarshal(response)
 	if err != nil {
 		return nil, err
 	}
-	return &reply, err
+	reply, err = getTableUpdatesFromRawUnmarshal(response, ovs.Schema[database])
+	if err != nil {
+		return nil, err
+	}
+	return reply, err
 }
 
-func getTableUpdatesFromRawUnmarshal(raw map[string]map[string]RowUpdate) TableUpdates {
+func getTableUpdatesFromRawUnmarshal(raw map[string]map[string]OvsRowUpdate, schema *DatabaseSchema) (*TableUpdates, error) {
 	var tableUpdates TableUpdates
 	tableUpdates.Updates = make(map[string]TableUpdate)
-	for table, update := range raw {
-		tableUpdate := TableUpdate{update}
-		tableUpdates.Updates[table] = tableUpdate
+	if schema == nil {
+		return nil, fmt.Errorf("cannot work without schema")
 	}
-	return tableUpdates
+	for table, update := range raw {
+		tableSchema, ok := schema.Tables[table]
+		if !ok {
+			return nil, fmt.Errorf("Unknown table %s", table)
+		}
+		tableUpdate, err := NewTableUpdate(update, &tableSchema)
+		if err != nil {
+			return nil, err
+		}
+		tableUpdates.Updates[table] = *tableUpdate
+	}
+	return &tableUpdates, nil
 }
 
 func clearConnection(c *rpc2.Client) {
