@@ -110,6 +110,56 @@ type BaseType struct {
 	RefType    RefType          `json:"refType,omitempty"`
 }
 
+func (column *ColumnSchema) nativeTypeFromExtended(extended ExtendedType) (reflect.Type, error) {
+	switch extended {
+	case TypeInteger:
+		return reflect.TypeOf(0), nil
+	case TypeReal:
+		return reflect.TypeOf(0.0), nil
+	case TypeBoolean:
+		return reflect.TypeOf(true), nil
+	case TypeString:
+		return reflect.TypeOf(""), nil
+	case TypeUUID:
+		return reflect.TypeOf(""), nil
+	default:
+		return reflect.TypeOf(nil), fmt.Errorf("Failed to determine type of column %s", extended)
+	}
+}
+
+//NativeType returns the reflect.Type that can hold the value of a column
+//OVS Type to Native Type convertions:
+// OVS sets -> go slices
+// OVS uuid -> go strings
+// OVS map  -> go map
+// OVS enum -> go native type depending on the type of the enum key
+func (column *ColumnSchema) NativeType() (reflect.Type, error) {
+	switch column.Type {
+	case TypeInteger, TypeReal, TypeBoolean, TypeUUID, TypeString:
+		return column.nativeTypeFromExtended(column.Type)
+	case TypeEnum:
+		return column.nativeTypeFromExtended(column.TypeObj.Key.Type)
+	case TypeMap:
+		kType, err := column.nativeTypeFromExtended(column.TypeObj.Key.Type)
+		if err != nil {
+			return reflect.TypeOf(nil), err
+		}
+		vType, err := column.nativeTypeFromExtended(column.TypeObj.Value.Type)
+		if err != nil {
+			return reflect.TypeOf(nil), err
+		}
+		return reflect.MapOf(kType, vType), nil
+	case TypeSet:
+		kType, err := column.nativeTypeFromExtended(column.TypeObj.Key.Type)
+		if err != nil {
+			return reflect.TypeOf(nil), err
+		}
+		return reflect.SliceOf(kType), nil
+	default:
+		return reflect.TypeOf(nil), fmt.Errorf("Failed to determine type of column %s", column.TypeString())
+	}
+}
+
 // TypeString returns a string representation of the (native) column type
 func (column *ColumnSchema) TypeString() string {
 	switch column.Type {
