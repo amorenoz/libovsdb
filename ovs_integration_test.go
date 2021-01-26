@@ -12,6 +12,8 @@ import (
 const (
 	defOvsRunDir = "/var/run/openvswitch"
 	defOvsSocket = "db.sock"
+	table        = "Open_vSwitch"
+	db           = "Open_vSwitch"
 )
 
 var cfg *Config
@@ -164,11 +166,20 @@ func TestInsertTransact(t *testing.T) {
 	}
 
 	// Inserting a Bridge row in Bridge table requires mutating the open_vswitch table.
-	mutateUUID := []UUID{{namedUUID}}
-	mutateSet, _ := NewOvsSet(mutateUUID)
-	mutation := NewMutation("bridges", "insert", mutateSet)
+	mutateUUID := namedUUID
+	mutateSet := []string{mutateUUID}
+	mutation, err := NewMutation(ovs.Schema[db].Tables[table].Columns["bridges"], "insert", mutateSet)
+	if err != nil {
+		t.Error(err)
+		log.Fatal(err)
+
+	}
 	// hacked Condition till we get Monitor / Select working
-	condition := NewCondition("_uuid", "!=", UUID{"2f77b348-9768-4866-b761-89d5177ecdab"})
+	condition, err := NewCondition(ovs.Schema[db].Tables[table].Columns["_uuid"], "!=", "2f77b348-9768-4866-b761-89d5177ecdab")
+	if err != nil {
+		t.Error(err)
+		log.Fatal(err)
+	}
 
 	// simple mutate operation
 	mutateOp := Operation{
@@ -181,6 +192,7 @@ func TestInsertTransact(t *testing.T) {
 	operations := []Operation{insertOp, mutateOp}
 	reply, err := ovs.Transact("Open_vSwitch", operations...)
 
+	//	t.Error("Transaction would be ", mutateOp)
 	if len(reply) < len(operations) {
 		t.Error("Number of Replies should be atleast equal to number of Operations")
 	}
@@ -218,7 +230,7 @@ func TestDeleteTransact(t *testing.T) {
 	}
 
 	// simple delete operation
-	condition := NewCondition("name", "==", bridgeName)
+	condition, _ := NewCondition(ovs.Schema[db].Tables["Bridge"].Columns["name"], "==", bridgeName)
 	deleteOp := Operation{
 		Op:    "delete",
 		Table: "Bridge",
@@ -226,11 +238,11 @@ func TestDeleteTransact(t *testing.T) {
 	}
 
 	// Deleting a Bridge row in Bridge table requires mutating the open_vswitch table.
-	mutateUUID := []UUID{{bridgeUUID}}
-	mutateSet, _ := NewOvsSet(mutateUUID)
-	mutation := NewMutation("bridges", "delete", mutateSet)
+	mutateUUID := []string{bridgeUUID}
+	mutateSet := mutateUUID
+	mutation, _ := NewMutation(ovs.Schema[db].Tables[table].Columns["bridges"], "delete", mutateSet)
 	// hacked Condition till we get Monitor / Select working
-	condition = NewCondition("_uuid", "!=", UUID{"2f77b348-9768-4866-b761-89d5177ecdab"})
+	condition, _ = NewCondition(ovs.Schema[db].Tables[table].Columns["_uuid"], "!=", "2f77b348-9768-4866-b761-89d5177ecdab")
 
 	// simple mutate operation
 	mutateOp := Operation{

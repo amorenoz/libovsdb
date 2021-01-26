@@ -1,6 +1,7 @@
 package libovsdb
 
 import "encoding/json"
+import "fmt"
 
 // Operation represents an operation according to RFC7047 section 5.2
 type Operation struct {
@@ -82,7 +83,9 @@ type TableUpdate struct {
 // NewTableUpdate creates a native table update from an OvsRowUpdate
 // and a table schema
 func NewTableUpdate(ovsUpdate map[string]OvsRowUpdate, table *TableSchema) (*TableUpdate, error) {
-	update := TableUpdate{}
+	update := TableUpdate{
+		Rows: make(map[string]RowUpdate),
+	}
 	for key, ovsRowUpdate := range ovsUpdate {
 		newNative, err := ovsRowUpdate.New.Data(table)
 		if err != nil {
@@ -119,13 +122,22 @@ type OvsdbError struct {
 }
 
 // NewCondition creates a new condition as specified in RFC7047
-func NewCondition(column string, function string, value interface{}) []interface{} {
-	return []interface{}{column, function, value}
+func NewCondition(column *ColumnSchema, function string, value interface{}) ([]interface{}, error) {
+	ovsVal, err := column.NativeToOvs(value)
+	fmt.Printf("OVS VAL %v from  %v\n", ovsVal, value)
+	if err != nil {
+		return nil, err
+	}
+	return []interface{}{column.Name, function, ovsVal}, nil
 }
 
 // NewMutation creates a new mutation as specified in RFC7047
-func NewMutation(column string, mutator string, value interface{}) []interface{} {
-	return []interface{}{column, mutator, value}
+func NewMutation(column *ColumnSchema, mutator string, value interface{}) ([]interface{}, error) {
+	ovsVal, err := column.NativeToOvs(value)
+	if err != nil {
+		return nil, err
+	}
+	return []interface{}{column.Name, mutator, ovsVal}, nil
 }
 
 // TransactResponse represents the response to a Transact Operation

@@ -91,12 +91,14 @@ func Connect(endpoints string, tlsConfig *tls.Config) (*OvsdbClient, error) {
 func newRPC2Client(conn net.Conn) (*OvsdbClient, error) {
 	c := rpc2.NewClientWithCodec(jsonrpc.NewJSONCodec(conn))
 	c.SetBlocking(true)
-	c.Handle("echo", echo)
-	c.Handle("update", update)
-	go c.Run()
-	go handleDisconnectNotification(c)
 
 	ovs := newOvsdbClient(c)
+
+	c.Handle("echo", ovs.echo)
+	c.Handle("update", ovs.update)
+
+	go c.Run()
+	go handleDisconnectNotification(c)
 
 	// Process Async Notifications
 	dbs, err := ovs.ListDbs()
@@ -171,7 +173,7 @@ type NotificationHandler interface {
 }
 
 // RFC 7047 : Section 4.1.6 : Echo
-func echo(client *rpc2.Client, args []interface{}, reply *[]interface{}) error {
+func (ovs OvsdbClient) echo(client *rpc2.Client, args []interface{}, reply *[]interface{}) error {
 	*reply = args
 	connectionsMutex.RLock()
 	defer connectionsMutex.RUnlock()
@@ -185,12 +187,33 @@ func echo(client *rpc2.Client, args []interface{}, reply *[]interface{}) error {
 	return nil
 }
 
+func update(client *rpc2.Client, params []interface{}, what *interface{}) error {
+	ovs := &OvsdbClient{
+		rpcClient:     nil,
+		Schema:        make(map[string]*DatabaseSchema),
+		handlersMutex: &sync.Mutex{},
+	}
+	return ovs.update(client, params, what)
+}
+
+func echo(client *rpc2.Client, args []interface{}, reply *[]interface{}) error {
+	ovs := &OvsdbClient{
+		rpcClient:     nil,
+		Schema:        make(map[string]*DatabaseSchema),
+		handlersMutex: &sync.Mutex{},
+	}
+	return ovs.echo(client, args, reply)
+}
+
 // RFC 7047 : Update Notification Section 4.1.6
 // Processing "params": [<json-value>, <table-updates>]
-func update(client *rpc2.Client, params []interface{}, _ *interface{}) error {
+func (ovs OvsdbClient) update(client *rpc2.Client, params []interface{}, what *interface{}) error {
 	if len(params) < 2 {
 		return errors.New("Invalid Update message")
 	}
+
+	fmt.Printf("UPDATDE %+v\n", what)
+	fmt.Printf("UPDATDE %+v\n", params)
 	// Ignore params[0] as we dont use the <json-value> currently for comparison
 
 	raw, ok := params[1].(map[string]interface{})
