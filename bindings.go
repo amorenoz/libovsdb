@@ -88,21 +88,40 @@ func OvsToNative(column *ColumnSchema, ovsElem interface{}) (interface{}, error)
 		}
 		return uuid.GoUUID, nil
 	case TypeSet:
-		ovsSet, ok := ovsElem.(OvsSet)
-		if !ok {
-			return nil, fmt.Errorf("Element in column should be convertible to Set. Instead got %s", reflect.TypeOf(ovsElem))
-		}
 		// The inner slice is []interface{}
 		// We need to convert it to the real type os slice
 		nativeSet := reflect.MakeSlice(naType, 0, 0)
-		for _, v := range ovsSet.GoSet {
-			vv, err := NativeValueOf(v, column.TypeObj.Key.Type)
+
+		// RFC says that for a set of exactly one, an atom type an be sent
+		switch ovsElem.(type) {
+		case OvsSet:
+			ovsSet := ovsElem.(OvsSet)
+			for _, v := range ovsSet.GoSet {
+				vv, err := NativeValueOf(v, column.TypeObj.Key.Type)
+				if err != nil {
+					return nil, err
+				}
+				nativeSet = reflect.Append(nativeSet, vv)
+			}
+
+		default:
+			keyType, err := nativeTypeFromExtended(column.TypeObj.Key.Type)
 			if err != nil {
 				return nil, err
+			}
+
+			vv, err := NativeValueOf(ovsElem, column.TypeObj.Key.Type)
+			if err != nil {
+				return nil, err
+			}
+
+			if !vv.Type().ConvertibleTo(keyType) {
+				return nil, fmt.Errorf("Element in column should be convertible to Set of %s. Instead got %s", column.TypeObj.Key.Type, reflect.TypeOf(ovsElem))
 			}
 			nativeSet = reflect.Append(nativeSet, vv)
 		}
 		return nativeSet.Interface(), nil
+
 	case TypeMap:
 		ovsMap, ok := ovsElem.(OvsMap)
 		if !ok {
@@ -135,6 +154,7 @@ func NativeToOvs(column *ColumnSchema, rawElem interface{}) (interface{}, error)
 	if err != nil {
 		return nil, err
 	}
+
 	if t := reflect.TypeOf(rawElem); t != naType {
 		return nil, fmt.Errorf("Bad Type in column expected %s, got %s (%v)",
 			naType.String(), t.String(), rawElem)
