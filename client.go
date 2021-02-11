@@ -19,6 +19,7 @@ import (
 type OvsdbClient struct {
 	rpcClient     *rpc2.Client
 	Schema        map[string]*DatabaseSchema
+	Apis          map[string]NativeAPI
 	handlers      []NotificationHandler
 	handlersMutex *sync.Mutex
 }
@@ -105,10 +106,12 @@ func newRPC2Client(conn net.Conn) (*OvsdbClient, error) {
 		return nil, err
 	}
 
+	ovs.Apis = make(map[string]NativeAPI)
 	for _, db := range dbs {
 		schema, err := ovs.GetSchema(db)
 		if err == nil {
 			ovs.Schema[db] = schema
+			ovs.Apis[db] = NewNativeAPI(*schema)
 		} else {
 			c.Close()
 			return nil, err

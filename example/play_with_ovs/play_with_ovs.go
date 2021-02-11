@@ -23,9 +23,10 @@ func play(ovs *libovsdb.OvsdbClient) {
 			for table, tableUpdate := range currUpdate.Updates {
 				if table == "Bridge" {
 					for uuid, row := range tableUpdate.Rows {
-						newRow := row.New
-						if _, ok := newRow.Fields["name"]; ok {
-							name := newRow.Fields["name"].(string)
+						var rowData map[string]interface{}
+						ovs.Apis["Open_vSwitch"].GetRowData("Bridge", &row.New, &rowData)
+						if _, ok := rowData["name"]; ok {
+							name := rowData["name"].(string)
 							if name == "stop" {
 								fmt.Println("Bridge stop detected : ", uuid)
 								ovs.Disconnect()
@@ -41,25 +42,38 @@ func play(ovs *libovsdb.OvsdbClient) {
 }
 
 func createBridge(ovs *libovsdb.OvsdbClient, bridgeName string) {
+	api := ovs.Apis["Open_vSwitch"]
 	namedUUID := "gopher"
 	// bridge row to insert
 	bridge := make(map[string]interface{})
 	bridge["name"] = bridgeName
+	bridge["external_ids"] = map[string]string{"purpose": "fun"}
 
+	brow, err := api.NewRow("Bridge", bridge)
+	if err != nil {
+		fmt.Printf("Row Error: %s", err.Error())
+		os.Exit(1)
+
+	}
 	// simple insert operation
 	insertOp := libovsdb.Operation{
 		Op:       "insert",
 		Table:    "Bridge",
-		Row:      bridge,
+		Row:      brow,
 		UUIDName: namedUUID,
 	}
 
 	// Inserting a Bridge row in Bridge table requires mutating the open_vswitch table.
-	uuidParameter := libovsdb.UUID{GoUUID: getRootUUID()}
-	mutateUUID := []libovsdb.UUID{{GoUUID: namedUUID}}
-	mutateSet, _ := libovsdb.NewOvsSet(mutateUUID)
-	mutation := libovsdb.NewMutation("bridges", "insert", mutateSet)
-	condition := libovsdb.NewCondition("_uuid", "==", uuidParameter)
+	mutation, err := api.NewMutation("Open_vSwitch", "bridges", "insert", []string{namedUUID})
+	if err != nil {
+		fmt.Printf("Mutation Error: %s", err.Error())
+		os.Exit(1)
+	}
+	condition, err := api.NewCondition("Open_vSwitch", "_uuid", "==", getRootUUID())
+	if err != nil {
+		fmt.Printf("Condition Error: %s", err.Error())
+		os.Exit(1)
+	}
 
 	// simple mutate operation
 	mutateOp := libovsdb.Operation{
