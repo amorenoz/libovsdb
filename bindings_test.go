@@ -97,6 +97,23 @@ func getTransMaps() []map[string]interface{} {
 		"ovs2native": aSet,
 	})
 
+	// string with exactly one element can also be represented
+	// as the element itself. On ovs2native, we keep the slice representation
+	s1, _ := NewOvsSet([]string{aString})
+	transMap = append(transMap, map[string]interface{}{
+		"schema": []byte(`{
+          "type": {
+            "key": "string",
+            "max": "unlimited",
+            "min": 0
+          }
+        }`),
+		"native":     []string{aString},
+		"native2ovs": s1,
+		"ovs":        aString,
+		"ovs2native": []string{aString},
+	})
+
 	// UUID set
 	us := make([]UUID, 0)
 	for _, u := range aUUIDSet {
@@ -118,6 +135,26 @@ func getTransMaps() []map[string]interface{} {
 		"native2ovs": uss,
 		"ovs":        *uss,
 		"ovs2native": aUUIDSet,
+	})
+
+	// UUID set with exactly one element.
+	us1 := []UUID{{GoUUID: aUUID0}}
+	uss1, _ := NewOvsSet(us1)
+	transMap = append(transMap, map[string]interface{}{
+		"schema": []byte(`{
+	"type":{
+            "key": {
+              "refTable": "SomeOtherTAble",
+              "refType": "weak",
+              "type": "uuid"
+            },
+            "min": 0
+         }
+	}`),
+		"native":     []string{aUUID0},
+		"native2ovs": uss1,
+		"ovs":        UUID{GoUUID: aUUID0},
+		"ovs2native": []string{aUUID0},
 	})
 
 	// A integer set
