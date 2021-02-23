@@ -1,5 +1,11 @@
 package libovsdb
 
+import (
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+)
+
 var (
 	aString  = "foo"
 	aEnum    = "enum1"
@@ -40,3 +46,15 @@ var (
 
 	aEmptySet = []string{}
 )
+
+func testOvsSet(t *testing.T, set interface{}) *OvsSet {
+	oSet, err := NewOvsSet(set)
+	assert.Nil(t, err)
+	return oSet
+}
+
+func testOvsMap(t *testing.T, set interface{}) *OvsMap {
+	oMap, err := NewOvsMap(set)
+	assert.Nil(t, err)
+	return oMap
+}
