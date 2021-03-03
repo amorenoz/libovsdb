@@ -11,6 +11,7 @@ type ormInfo struct {
 	// FieldName indexed by column
 	fields map[string]string
 	obj    interface{}
+	table  *TableSchema
 }
 
 // FieldByColumn returns the field value that corresponds to a column
@@ -64,6 +65,39 @@ func (oi *ormInfo) columnByPtr(fieldPtr interface{}) (string, error) {
 	return "", fmt.Errorf("Field pointer does not correspond to ORM struct")
 }
 
+// getValidORMIndexes inspects the object and returns the a list of indexes (set of columns) for witch
+// the object has non-default values
+func (oi *ormInfo) getValidORMIndexes() ([][]string, error) {
+	var validIndexes [][]string
+	var possibleIndexes [][]string
+
+	possibleIndexes = append(possibleIndexes, []string{"_uuid"})
+	possibleIndexes = append(possibleIndexes, oi.table.Indexes...)
+
+	// Iterate through indexes and validate them
+OUTER:
+	for _, idx := range possibleIndexes {
+		for _, col := range idx {
+			if !oi.hasColumn(col) {
+				continue OUTER
+			}
+			columnSchema := oi.table.Column(col)
+			if columnSchema == nil {
+				continue OUTER
+			}
+			field, err := oi.fieldByColumn(col)
+			if err != nil {
+				return nil, err
+			}
+			if !reflect.ValueOf(field).IsValid() || IsDefaultValue(columnSchema, field) {
+				continue OUTER
+			}
+		}
+		validIndexes = append(validIndexes, idx)
+	}
+	return validIndexes, nil
+}
+
 // newORMInfo creates a ormInfo structure around an object based on a given table schema
 func newORMInfo(table *TableSchema, obj interface{}) (*ormInfo, error) {
 	objPtrVal := reflect.ValueOf(obj)
@@ -112,5 +146,6 @@ func newORMInfo(table *TableSchema, obj interface{}) (*ormInfo, error) {
 	return &ormInfo{
 		fields: fields,
 		obj:    obj,
+		table:  table,
 	}, nil
 }

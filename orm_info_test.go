@@ -235,3 +235,135 @@ func TestOrmInfoColByPtr(t *testing.T) {
 		})
 	}
 }
+
+func TestOrmGetIndex(t *testing.T) {
+	tableSchema := []byte(`{
+      "indexes": [["name"],["composed_1","composed_2"]],
+      "columns": {
+        "name": {
+          "type": "string"
+        },
+        "composed_1": {
+          "type": {
+            "key": "string"
+          }
+        },
+        "composed_2": {
+          "type": {
+            "key": "string"
+          }
+        },
+        "config": {
+          "type": {
+            "key": "string",
+            "max": "unlimited",
+            "min": 0,
+            "value": "string"
+          }
+	}
+      }
+   }`)
+	var table TableSchema
+	err := json.Unmarshal(tableSchema, &table)
+	assert.Nil(t, err)
+
+	type obj struct {
+		ID     string            `ovs:"_uuid"`
+		MyName string            `ovs:"name"`
+		Config map[string]string `ovs:"config"`
+		Comp1  string            `ovs:"composed_1"`
+		Comp2  string            `ovs:"composed_2"`
+	}
+	type test struct {
+		name     string
+		obj      interface{}
+		expected [][]string
+		err      bool
+	}
+	tests := []test{
+		{
+			name:     "empty",
+			obj:      &obj{},
+			expected: [][]string{},
+			err:      false,
+		},
+		{
+			name: "UUID",
+			obj: &obj{
+				ID: aUUID0,
+			},
+			expected: [][]string{{"_uuid"}},
+			err:      false,
+		},
+		{
+			name: "simple",
+			obj: &obj{
+				MyName: "foo",
+			},
+			expected: [][]string{{"name"}},
+			err:      false,
+		},
+		{
+			name: "additional index",
+			obj: &obj{
+				ID:     aUUID0,
+				MyName: "foo",
+			},
+			expected: [][]string{{"_uuid"}, {"name"}},
+			err:      false,
+		},
+		{
+			name: "complex index",
+			obj: &obj{
+				Comp1: "foo",
+				Comp2: "bar",
+			},
+			expected: [][]string{{"composed_1", "composed_2"}},
+			err:      false,
+		},
+		{
+			name: "multiple index",
+			obj: &obj{
+				MyName: "something",
+				Comp1:  "foo",
+				Comp2:  "bar",
+			},
+			expected: [][]string{{"name"}, {"composed_1", "composed_2"}},
+			err:      false,
+		},
+		{
+			name: "all ",
+			obj: &obj{
+				ID:     aUUID0,
+				MyName: "something",
+				Comp1:  "foo",
+				Comp2:  "bar",
+			},
+			expected: [][]string{{"_uuid"}, {"name"}, {"composed_1", "composed_2"}},
+			err:      false,
+		},
+		{
+			name: "Error: None",
+			obj: &obj{
+				Config: map[string]string{"foo": "bar"},
+			},
+			expected: [][]string{},
+			err:      false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(fmt.Sprintf("GetValidIndexes_%s", tt.name), func(t *testing.T) {
+			info, err := newORMInfo(&table, tt.obj)
+			assert.Nil(t, err)
+
+			indexes, err := info.getValidORMIndexes()
+			if tt.err {
+				assert.NotNil(t, err)
+			} else {
+				assert.Nil(t, err)
+				assert.ElementsMatchf(t, tt.expected, indexes, "Indexes must match")
+			}
+
+		})
+	}
+}

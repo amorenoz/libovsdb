@@ -52,6 +52,7 @@ func NewErrNoTable(table string) error {
 // newORM returns a new ORM
 func newORM(schema *DatabaseSchema) *orm {
 	return &orm{
+
 		schema: schema,
 	}
 }
@@ -133,4 +134,69 @@ func (o orm) newRow(tableName string, data interface{}) (map[string]interface{},
 	}
 	return ovsRow, nil
 
+}
+
+// newCondition returns a list of conditions that match a given object
+// A list of valid columns that shall be used as a index can be provided.
+// If none are provided, we will try to use object's field that matches the '_uuid' ovs tag
+// If it does not exist or is null (""), then we will traverse all of the table indexes and
+// use the first index (list of simultaneously unique columnns) for witch the provided ORM
+// object has valid data. The order in which they are traversed matches the order defined
+// in the schema.
+// By `valid data` we mean non-default data.
+func (o orm) newCondition(tableName string, data interface{}, fields ...interface{}) ([]interface{}, error) {
+	var conditions []interface{}
+	var condIndex [][]string
+
+	table := o.schema.Table(tableName)
+	if table == nil {
+		return nil, NewErrNoTable(tableName)
+	}
+
+	ormInfo, err := newORMInfo(table, data)
+	if err != nil {
+		return nil, err
+	}
+
+	// If index is provided, use it. If not, obtain the valid indexes from the ORM info
+	if len(fields) > 0 {
+		providedIndex := []string{}
+		for i := range fields {
+			if col, err := ormInfo.columnByPtr(fields[i]); err == nil {
+				providedIndex = append(providedIndex, col)
+			} else {
+				return nil, err
+			}
+		}
+		condIndex = append(condIndex, providedIndex)
+	} else {
+		var err error
+		condIndex, err = ormInfo.getValidORMIndexes()
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	if len(condIndex) == 0 {
+		return nil, fmt.Errorf("Failed to find a valid index")
+	}
+
+	// Pick the first valid index
+	for _, col := range condIndex[0] {
+		field, err := ormInfo.fieldByColumn(col)
+		if err != nil {
+			return nil, err
+		}
+
+		column := table.Column(col)
+		if column == nil {
+			return nil, fmt.Errorf("Column %s not found", col)
+		}
+		ovsVal, err := NativeToOvs(column, field)
+		if err != nil {
+			return nil, err
+		}
+		conditions = append(conditions, []interface{}{col, "==", ovsVal})
+	}
+	return conditions, nil
 }
