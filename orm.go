@@ -2,6 +2,7 @@ package libovsdb
 
 import (
 	"fmt"
+	"reflect"
 )
 
 // ORM offers functions to interact with libovsdb through user-provided native structs.
@@ -199,4 +200,92 @@ func (o orm) newCondition(tableName string, data interface{}, fields ...interfac
 		conditions = append(conditions, []interface{}{col, "==", ovsVal})
 	}
 	return conditions, nil
+}
+
+// equalFields compares two ORM objects.
+// The indexes to use for comparison are, the _uuid, the table indexes and the columns that correspond
+// to the ORM fields pointed to by 'fields'. They must be pointers to fields on the first ORM element (i.e: one)
+func (o orm) equalFields(tableName string, one, other interface{}, fields ...interface{}) (bool, error) {
+	indexes := []string{}
+
+	table := o.schema.Table(tableName)
+	if table == nil {
+		return false, NewErrNoTable(tableName)
+	}
+
+	info, err := newORMInfo(table, one)
+	if err != nil {
+		return false, err
+	}
+	for _, f := range fields {
+		col, err := info.columnByPtr(f)
+		if err != nil {
+			return false, err
+		}
+		indexes = append(indexes, col)
+	}
+	return o.equalIndexes(table, one, other, indexes...)
+}
+
+// equalIndexes returns whether both models are equal from the DB point of view
+// Two objectes are considered equal if any of the following conditions is true
+// They have a field tagged with column name '_uuid' and their values match
+// For any of the indexes defined in the Table Schema, the values all of its columns are simultaneously equal
+// (as per RFC7047)
+// The values of all of the optional indexes passed as variadic parameter to this function are equal.
+func (o orm) equalIndexes(table *TableSchema, one, other interface{}, indexes ...string) (bool, error) {
+	match := false
+
+	oneOrmInfo, err := newORMInfo(table, one)
+	if err != nil {
+		return false, err
+	}
+	otherOrmInfo, err := newORMInfo(table, other)
+	if err != nil {
+		return false, err
+	}
+
+	oneIndexes, err := oneOrmInfo.getValidORMIndexes()
+	if err != nil {
+		return false, err
+	}
+
+	otherIndexes, err := otherOrmInfo.getValidORMIndexes()
+	if err != nil {
+		return false, err
+	}
+
+	oneIndexes = append(oneIndexes, indexes)
+	otherIndexes = append(otherIndexes, indexes)
+
+	for _, lidx := range oneIndexes {
+		for _, ridx := range otherIndexes {
+			if reflect.DeepEqual(ridx, lidx) {
+				// All columns in an index must be simultaneously equal
+				for _, col := range lidx {
+					if !oneOrmInfo.hasColumn(col) || !otherOrmInfo.hasColumn(col) {
+						break
+					}
+					lfield, err := oneOrmInfo.fieldByColumn(col)
+					if err != nil {
+						return false, err
+					}
+					rfield, err := otherOrmInfo.fieldByColumn(col)
+					if err != nil {
+						return false, err
+					}
+					if reflect.DeepEqual(lfield, rfield) {
+						match = true
+					} else {
+						match = false
+						break
+					}
+				}
+				if match {
+					return true, nil
+				}
+			}
+		}
+	}
+	return false, nil
 }

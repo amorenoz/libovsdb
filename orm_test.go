@@ -466,3 +466,268 @@ func TestORMCondition(t *testing.T) {
 		})
 	}
 }
+
+func TestORMEqualIndexes(t *testing.T) {
+
+	var testSchema = []byte(`{
+  "cksum": "223619766 22548",
+  "name": "TestSchema",
+  "tables": {
+    "TestTable": {
+      "indexes": [["name"],["composed_1","composed_2"]],
+      "columns": {
+        "name": {
+          "type": "string"
+        },
+        "composed_1": {
+          "type": {
+            "key": "string"
+          }
+        },
+        "composed_2": {
+          "type": {
+            "key": "string"
+          }
+        },
+        "int1": {
+          "type": {
+            "key": "integer"
+          }
+        },
+        "int2": {
+          "type": {
+            "key": "integer"
+          }
+        },
+        "config": {
+          "type": {
+            "key": "string",
+            "max": "unlimited",
+            "min": 0,
+            "value": "string"
+          }
+	}
+      }
+    }
+  }
+}`)
+	type testType struct {
+		ID     string            `ovs:"_uuid"`
+		MyName string            `ovs:"name"`
+		Config map[string]string `ovs:"config"`
+		Comp1  string            `ovs:"composed_1"`
+		Comp2  string            `ovs:"composed_2"`
+		Int1   int               `ovs:"int1"`
+		Int2   int               `ovs:"int2"`
+	}
+
+	var schema DatabaseSchema
+	if err := json.Unmarshal(testSchema, &schema); err != nil {
+		t.Fatal(err)
+	}
+	orm := newORM(&schema)
+
+	type Test struct {
+		name     string
+		obj1     testType
+		obj2     testType
+		expected bool
+		indexes  []string
+	}
+	tests := []Test{
+		{
+			name: "same simple index",
+			obj1: testType{
+				MyName: "foo",
+			},
+			obj2: testType{
+				MyName: "foo",
+			},
+			expected: true,
+			indexes:  []string{},
+		},
+		{
+			name: "diff simple index",
+			obj1: testType{
+				MyName: "foo",
+			},
+			obj2: testType{
+				MyName: "bar",
+			},
+			expected: false,
+			indexes:  []string{},
+		},
+		{
+			name: "same uuid",
+			obj1: testType{
+				ID:     aUUID0,
+				MyName: "foo",
+			},
+			obj2: testType{
+				ID:     aUUID0,
+				MyName: "bar",
+			},
+			expected: true,
+			indexes:  []string{},
+		},
+		{
+			name: "diff uuid",
+			obj1: testType{
+				ID:     aUUID0,
+				MyName: "foo",
+			},
+			obj2: testType{
+				ID:     aUUID1,
+				MyName: "bar",
+			},
+			expected: false,
+			indexes:  []string{},
+		},
+		{
+			name: "same complex_index",
+			obj1: testType{
+				ID:     aUUID0,
+				MyName: "foo",
+				Comp1:  "foo",
+				Comp2:  "bar",
+			},
+			obj2: testType{
+				ID:     aUUID1,
+				MyName: "bar",
+				Comp1:  "foo",
+				Comp2:  "bar",
+			},
+			expected: true,
+			indexes:  []string{},
+		},
+		{
+			name: "different",
+			obj1: testType{
+				ID:     aUUID0,
+				MyName: "name1",
+				Comp1:  "foo",
+				Comp2:  "bar",
+			},
+			obj2: testType{
+				ID:     aUUID1,
+				MyName: "name2",
+				Comp1:  "foo",
+				Comp2:  "bar2",
+			},
+			expected: false,
+			indexes:  []string{},
+		},
+		{
+			name: "same additional index",
+			obj1: testType{
+				ID:     aUUID0,
+				MyName: "name1",
+				Comp1:  "foo",
+				Comp2:  "bar1",
+				Int1:   42,
+			},
+			obj2: testType{
+				ID:     aUUID1,
+				MyName: "name2",
+				Comp1:  "foo",
+				Comp2:  "bar2",
+				Int1:   42,
+			},
+			expected: true,
+			indexes:  []string{"int1"},
+		},
+		{
+			name: "diff additional index",
+			obj1: testType{
+				ID:     aUUID0,
+				MyName: "name1",
+				Comp1:  "foo",
+				Comp2:  "bar1",
+				Int1:   42,
+			},
+			obj2: testType{
+				ID:     aUUID1,
+				MyName: "name2",
+				Comp1:  "foo",
+				Comp2:  "bar2",
+				Int1:   420,
+			},
+			expected: false,
+			indexes:  []string{"int1"},
+		},
+		{
+			name: "same additional indexes ",
+			obj1: testType{
+				ID:     aUUID0,
+				MyName: "name1",
+				Comp1:  "foo",
+				Comp2:  "bar1",
+				Int1:   42,
+				Int2:   25,
+			},
+			obj2: testType{
+				ID:     aUUID1,
+				MyName: "name2",
+				Comp1:  "foo",
+				Comp2:  "bar2",
+				Int1:   42,
+				Int2:   25,
+			},
+			expected: true,
+			indexes:  []string{"int1", "int2"},
+		},
+		{
+			name: "diff additional indexes ",
+			obj1: testType{
+				ID:     aUUID0,
+				MyName: "name1",
+				Comp1:  "foo",
+				Comp2:  "bar1",
+				Int1:   42,
+				Int2:   50,
+			},
+			obj2: testType{
+				ID:     aUUID1,
+				MyName: "name2",
+				Comp1:  "foo",
+				Comp2:  "bar2",
+				Int1:   42,
+				Int2:   25,
+			},
+			expected: false,
+			indexes:  []string{"int1", "int2"},
+		},
+	}
+	for _, test := range tests {
+		t.Run(fmt.Sprintf("Equal %s", test.name), func(t *testing.T) {
+			eq, err := orm.equalIndexes(orm.schema.Table("TestTable"), &test.obj1, &test.obj2, test.indexes...)
+			assert.Nil(t, err)
+			assert.Equalf(t, test.expected, eq, "equal value should match expected")
+		})
+	}
+
+	// Test we can also use field pointers
+	obj1 := testType{
+		ID:     aUUID0,
+		MyName: "name1",
+		Comp1:  "foo",
+		Comp2:  "bar1",
+		Int1:   42,
+		Int2:   25,
+	}
+	obj2 := testType{
+		ID:     aUUID1,
+		MyName: "name2",
+		Comp1:  "foo",
+		Comp2:  "bar2",
+		Int1:   42,
+		Int2:   25,
+	}
+	eq, err := orm.equalFields("TestTable", &obj1, &obj2, &obj1.Int1, &obj1.Int2)
+	assert.Nil(t, err)
+	assert.True(t, eq)
+	// Useing pointers to second value is not supported
+	_, err = orm.equalFields("TestTable", &obj1, &obj2, &obj2.Int1, &obj2.Int2)
+	assert.NotNil(t, err)
+
+}
