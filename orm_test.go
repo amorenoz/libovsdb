@@ -206,6 +206,7 @@ func TestORMNewRow(t *testing.T) {
 		name        string
 		objInput    interface{}
 		expectedRow map[string]interface{}
+		shoulderr   bool
 	}{{
 		name: "string",
 		objInput: &struct {
@@ -223,13 +224,13 @@ func TestORMNewRow(t *testing.T) {
 		},
 		expectedRow: map[string]interface{}{"aSet": testOvsSet(t, aSet)},
 	}, {
-		name: "emptySet",
+		name: "emptySet with no column specification",
 		objInput: &struct {
 			EmptySet []string `ovs:"aSet"`
 		}{
 			EmptySet: []string{},
 		},
-		expectedRow: map[string]interface{}{}, // Default values don't make it into the row
+		expectedRow: map[string]interface{}{},
 	}, {
 		name: "UUID",
 		objInput: &struct {
@@ -298,13 +299,107 @@ func TestORMNewRow(t *testing.T) {
 		expectedRow: map[string]interface{}{"aMap": testOvsMap(t, aMap)},
 	},
 	}
-
 	for _, test := range tests {
 		t.Run(fmt.Sprintf("NewRow: %s", test.name), func(t *testing.T) {
 			orm := newORM(&schema)
 			row, err := orm.newRow("TestTable", test.objInput)
-			assert.Nil(t, err)
-			assert.Equalf(t, test.expectedRow, row, "NewRow should match expeted")
+			if test.shoulderr {
+				assert.NotNil(t, err)
+			} else {
+				assert.Nil(t, err)
+				assert.Equalf(t, test.expectedRow, row, "NewRow should match expeted")
+			}
+		})
+	}
+}
+
+func TestORMNewRowFields(t *testing.T) {
+	var schema DatabaseSchema
+	if err := json.Unmarshal(testSchema, &schema); err != nil {
+		t.Error(err)
+	}
+
+	type obj struct {
+		MyMap    map[string]string `ovs:"aMap"`
+		MySet    []string          `ovs:"aSet"`
+		MyString string            `ovs:"aString"`
+		MyFloat  float64           `ovs:"aFloat"`
+	}
+	testObj := obj{}
+
+	tests := []struct {
+		name        string
+		prepare     func(*obj)
+		expectedRow map[string]interface{}
+		fields      []interface{}
+		err         bool
+	}{{
+		name: "string",
+		prepare: func(o *obj) {
+			o.MyString = aString
+		},
+		expectedRow: map[string]interface{}{"aString": aString},
+	}, {
+		name: "empty string with field specification",
+		prepare: func(o *obj) {
+			o.MyString = ""
+		},
+		fields:      []interface{}{&testObj.MyString},
+		expectedRow: map[string]interface{}{"aString": ""},
+	}, {
+		name: "empty set without field specification",
+		prepare: func(o *obj) {
+		},
+		expectedRow: map[string]interface{}{},
+	}, {
+		name: "empty set without field specification",
+		prepare: func(o *obj) {
+		},
+		fields:      []interface{}{&testObj.MySet},
+		expectedRow: map[string]interface{}{"aSet": testOvsSet(t, []string{})},
+	}, {
+		name: "empty maps",
+		prepare: func(o *obj) {
+			o.MyString = "foo"
+		},
+		expectedRow: map[string]interface{}{"aString": aString},
+	}, {
+		name: "empty maps with field specification",
+		prepare: func(o *obj) {
+			o.MyString = "foo"
+		},
+		fields:      []interface{}{&testObj.MyMap},
+		expectedRow: map[string]interface{}{"aMap": testOvsMap(t, map[string]string{})},
+	}, {
+		name: "Complex object with field selection",
+		prepare: func(o *obj) {
+			o.MyString = aString
+			o.MyMap = aMap
+			o.MySet = aSet
+			o.MyFloat = aFloat
+		},
+		fields:      []interface{}{&testObj.MyMap, &testObj.MySet},
+		expectedRow: map[string]interface{}{"aMap": testOvsMap(t, aMap), "aSet": testOvsSet(t, aSet)},
+	},
+	}
+
+	for _, test := range tests {
+		t.Run(fmt.Sprintf("NewRow: %s", test.name), func(t *testing.T) {
+			orm := newORM(&schema)
+			// Clean the test object
+			testObj.MyString = ""
+			testObj.MyMap = nil
+			testObj.MySet = nil
+			testObj.MyFloat = 0
+
+			test.prepare(&testObj)
+			row, err := orm.newRow("TestTable", &testObj, test.fields...)
+			if test.err {
+				assert.NotNil(t, err)
+			} else {
+				assert.Nil(t, err)
+				assert.Equalf(t, test.expectedRow, row, "NewRow should match expeted")
+			}
 		})
 	}
 }

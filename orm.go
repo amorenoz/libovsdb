@@ -106,8 +106,10 @@ func (o orm) getData(tableName string, ovsData map[string]interface{}, result in
 	return nil
 }
 
-// NewRow transforms an orm struct to a map[string] interface{} that can be used as libovsdb.Row
-func (o orm) newRow(tableName string, data interface{}) (map[string]interface{}, error) {
+// newRow transforms an orm struct to a map[string] interface{} that can be used as libovsdb.Row
+// By default, default or null values are skipped. This behaviour can be modified by specifying
+// a list of fields (pointers to fields in the struct) to be added to the row
+func (o orm) newRow(tableName string, data interface{}, fields ...interface{}) (map[string]interface{}, error) {
 	table := o.schema.Table(tableName)
 	if table == nil {
 		return nil, NewErrNoTable(tableName)
@@ -116,6 +118,7 @@ func (o orm) newRow(tableName string, data interface{}) (map[string]interface{},
 	if err != nil {
 		return nil, err
 	}
+
 	ovsRow := make(map[string]interface{}, len(table.Columns))
 	for name, column := range table.Columns {
 		nativeElem, err := ormInfo.fieldByColumn(name)
@@ -124,7 +127,25 @@ func (o orm) newRow(tableName string, data interface{}) (map[string]interface{},
 			continue
 		}
 
-		if IsDefaultValue(column, nativeElem) {
+		// add specific fields
+		if len(fields) > 0 {
+			found := false
+			for _, f := range fields {
+				col, err := ormInfo.columnByPtr(f)
+				if err != nil {
+					return nil, err
+				}
+				if col == name {
+					found = true
+					break
+				}
+			}
+			if !found {
+				continue
+			}
+		}
+
+		if len(fields) == 0 && IsDefaultValue(column, nativeElem) {
 			continue
 		}
 		ovsElem, err := NativeToOvs(column, nativeElem)
@@ -134,7 +155,6 @@ func (o orm) newRow(tableName string, data interface{}) (map[string]interface{},
 		ovsRow[name] = ovsElem
 	}
 	return ovsRow, nil
-
 }
 
 // newCondition returns a list of conditions that match a given object
