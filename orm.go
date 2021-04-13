@@ -53,7 +53,6 @@ func NewErrNoTable(table string) error {
 // newORM returns a new ORM
 func newORM(schema *DatabaseSchema) *orm {
 	return &orm{
-
 		schema: schema,
 	}
 }
