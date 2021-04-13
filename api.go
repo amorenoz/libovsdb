@@ -14,6 +14,13 @@ type API interface {
 	// If it has a capacity != 0, only 'capacity' elements will be filled in
 	List(result interface{}) error
 
+	// Get retrieves a model from the cache
+	// The way the object will be fetch depends on the data contained in the
+	// provided model and the indexes defined in the associated schema
+	// For more complex ways of searching for elements in the cache, the
+	// preferred way is Where({condition}).List()
+	Get(Model) error
+
 	// Create a ConditionalAPI based on the conditions provided
 	// There are currently two supported conditions:
 	//
@@ -28,7 +35,9 @@ type API interface {
 }
 
 type ConditionalAPI interface {
-	API
+	// List uses the condition to search on the cache and populates
+	// the slice of Models objects based on their type
+	List(result interface{}) error
 }
 
 // Error handling
@@ -148,6 +157,52 @@ func (a api) Where(first interface{}, extra ...interface{}) ConditionalAPI {
 		}
 	}
 	return newConditionalAPI(a.cache, condition)
+}
+
+// Get is a generic Get function capable of returning (through a provided pointer)
+// a instance of any row in the cache.
+// 'result' must be a pointer to an Model that exists in the DBModel
+//
+// The way the cache is search depends on the fields already populated in 'result'
+// Any table index (including _uuid) will be used for comparison
+func (a api) Get(model Model) error {
+	table, err := a.getTableFromModel(model)
+	if err != nil {
+		return err
+	}
+
+	tableCache := a.cache.Table(table)
+	if tableCache == nil {
+		return NotFoundError
+	}
+
+	// If model contains _uuid value, we can access it via cache index
+	ormInfo, err := newORMInfo(a.cache.orm.schema.Table(table), model)
+	if err != nil {
+		return err
+	}
+	if uuid, err := ormInfo.fieldByColumn("_uuid"); err != nil && uuid != nil {
+		if found := tableCache.Row(uuid.(string)); found == nil {
+			return NotFoundError
+		} else {
+			reflect.ValueOf(model).Elem().Set(reflect.Indirect(reflect.ValueOf(found)))
+			return nil
+		}
+	}
+
+	// Look across the entire cache for table index equality
+	for _, row := range tableCache.Rows() {
+		elem := tableCache.Row(row)
+		equal, err := a.cache.orm.equalFields(table, model, elem.(Model))
+		if err != nil {
+			return err
+		}
+		if equal {
+			reflect.ValueOf(model).Elem().Set(reflect.Indirect(reflect.ValueOf(elem)))
+			return nil
+		}
+	}
+	return NotFoundError
 }
 
 // getTableFromModel returns the table name from a Model object after performing

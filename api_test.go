@@ -382,3 +382,83 @@ func TestWhere(t *testing.T) {
 		})
 	}
 }
+
+func TestAPIGet(t *testing.T) {
+	cache := apiTestCache(t)
+	lsCacheList := []Model{}
+	lspCacheList := []Model{
+		&testLogicalSwitchPort{
+			UUID:        aUUID2,
+			Name:        "lsp0",
+			Type:        "foo",
+			ExternalIds: map[string]string{"foo": "bar"},
+		},
+		&testLogicalSwitchPort{
+			UUID:        aUUID3,
+			Name:        "lsp1",
+			Type:        "bar",
+			ExternalIds: map[string]string{"foo": "baz"},
+		},
+	}
+	lsCache := map[string]Model{}
+	lspCache := map[string]Model{}
+	for i := range lsCacheList {
+		lsCache[lsCacheList[i].(*testLogicalSwitch).UUID] = lsCacheList[i]
+	}
+	for i := range lspCacheList {
+		lspCache[lspCacheList[i].(*testLogicalSwitchPort).UUID] = lspCacheList[i]
+	}
+	cache.cache["Logical_Switch"] = &RowCache{cache: lsCache}
+	cache.cache["Logical_Switch_Port"] = &RowCache{cache: lspCache}
+
+	test := []struct {
+		name    string
+		prepare func(Model)
+		result  Model
+		err     bool
+	}{
+		{
+			name: "empty",
+			prepare: func(m Model) {
+			},
+			err: true,
+		},
+		{
+			name: "non_existing",
+			prepare: func(m Model) {
+				m.(*testLogicalSwitchPort).Name = "foo"
+			},
+			err: true,
+		},
+		{
+			name: "by UUID",
+			prepare: func(m Model) {
+				m.(*testLogicalSwitchPort).UUID = aUUID3
+			},
+			result: lspCacheList[1],
+			err:    false,
+		},
+		{
+			name: "by name",
+			prepare: func(m Model) {
+				m.(*testLogicalSwitchPort).Name = "lsp0"
+			},
+			result: lspCacheList[0],
+			err:    false,
+		},
+	}
+	for _, tt := range test {
+		t.Run(fmt.Sprintf("ApiGet: %s", tt.name), func(t *testing.T) {
+			var result testLogicalSwitchPort
+			tt.prepare(&result)
+			api := newAPI(cache)
+			err := api.Get(&result)
+			if tt.err {
+				assert.NotNil(t, err)
+			} else {
+				assert.Nil(t, err)
+				assert.Equalf(t, tt.result, &result, "Result should match")
+			}
+		})
+	}
+}
