@@ -42,6 +42,13 @@ func (r *RowCache) Rows() []string {
 	return result
 }
 
+// Len returns the length of the cache
+func (r *RowCache) Len() int {
+	r.mutex.Lock()
+	defer r.mutex.Unlock()
+	return len(r.cache)
+}
+
 func newRowCache() *RowCache {
 	return &RowCache{
 		cache: make(map[string]Model),
