@@ -6,6 +6,10 @@ import (
 	"reflect"
 )
 
+const (
+	opInsert string = "insert"
+)
+
 // API defines basic operations to interact with the database
 type API interface {
 	// List populates a slice of Models objects based on their type
@@ -20,6 +24,12 @@ type API interface {
 	// For more complex ways of searching for elements in the cache, the
 	// preferred way is Where({condition}).List()
 	Get(Model) error
+
+	// Create returns the operation needed to add a model to the Database
+	// Only non-default fields will be added to the transaction
+	// If the _uuid field of the model has some content, it will be
+	// treated as named-uuid
+	Create(Model) (*Operation, error)
 
 	// Create a ConditionalAPI based on the conditions provided
 	// There are currently two supported conditions:
@@ -203,6 +213,43 @@ func (a api) Get(model Model) error {
 		}
 	}
 	return NotFoundError
+}
+
+// Create is a generic function capable of creating any row in the DB
+// A valud Model (pointer to object) must be provided.
+func (a api) Create(model Model) (*Operation, error) {
+	var namedUUID string
+	var err error
+
+	tableName, err := a.getTableFromModel(model)
+	if err != nil {
+		return nil, err
+	}
+	table := a.cache.orm.schema.Table(tableName)
+
+	// Read _uuid field, and use it as named-uuid
+	info, err := newORMInfo(table, model)
+	if err != nil {
+		return nil, err
+	}
+	if uuid, err := info.fieldByColumn("_uuid"); err == nil {
+		namedUUID = uuid.(string)
+	} else {
+		return nil, err
+	}
+
+	row, err := a.cache.orm.newRow(tableName, model)
+	if err != nil {
+		return nil, err
+	}
+
+	insertOp := Operation{
+		Op:       opInsert,
+		Table:    tableName,
+		Row:      row,
+		UUIDName: namedUUID,
+	}
+	return &insertOp, nil
 }
 
 // getTableFromModel returns the table name from a Model object after performing

@@ -53,6 +53,15 @@ func play(ovs *libovsdb.OvsdbClient) {
 				fmt.Printf("Bridge stop detected: %+v\n", *bridge)
 				ovs.Disconnect()
 				quit <- true
+			} else {
+				fmt.Printf("Current list of bridges:\n")
+				var bridges []ormBridge
+				if err := ovs.API.List(&bridges); err != nil {
+					log.Fatal(err)
+				}
+				for _, b := range bridges {
+					fmt.Printf("UUID: %s  Name: %s\n", b.UUID, b.Name)
+				}
 			}
 		}
 	}

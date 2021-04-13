@@ -462,3 +462,89 @@ func TestAPIGet(t *testing.T) {
 		})
 	}
 }
+
+func TestAPICreate(t *testing.T) {
+	cache := apiTestCache(t)
+	lsCacheList := []Model{}
+	lspCacheList := []Model{
+		&testLogicalSwitchPort{
+			UUID:        aUUID2,
+			Name:        "lsp0",
+			Type:        "foo",
+			ExternalIds: map[string]string{"foo": "bar"},
+		},
+		&testLogicalSwitchPort{
+			UUID:        aUUID3,
+			Name:        "lsp1",
+			Type:        "bar",
+			ExternalIds: map[string]string{"foo": "baz"},
+		},
+	}
+	lsCache := map[string]Model{}
+	lspCache := map[string]Model{}
+	for i := range lsCacheList {
+		lsCache[lsCacheList[i].(*testLogicalSwitch).UUID] = lsCacheList[i]
+	}
+	for i := range lspCacheList {
+		lspCache[lspCacheList[i].(*testLogicalSwitchPort).UUID] = lspCacheList[i]
+	}
+	cache.cache["Logical_Switch"] = &RowCache{cache: lsCache}
+	cache.cache["Logical_Switch_Port"] = &RowCache{cache: lspCache}
+
+	test := []struct {
+		name   string
+		input  Model
+		result *Operation
+		err    bool
+	}{
+		{
+			name:  "empty",
+			input: &testLogicalSwitch{},
+			result: &Operation{
+				Op:       "insert",
+				Table:    "Logical_Switch",
+				Row:      map[string]interface{}{},
+				UUIDName: "",
+			},
+			err: false,
+		},
+		{
+			name: "With some values",
+			input: &testLogicalSwitch{
+				Name: "foo",
+			},
+			result: &Operation{
+				Op:       "insert",
+				Table:    "Logical_Switch",
+				Row:      map[string]interface{}{"name": "foo"},
+				UUIDName: "",
+			},
+			err: false,
+		},
+		{
+			name: "With named UUID ",
+			input: &testLogicalSwitch{
+				UUID: "foo",
+			},
+			result: &Operation{
+				Op:       "insert",
+				Table:    "Logical_Switch",
+				Row:      map[string]interface{}{},
+				UUIDName: "foo",
+			},
+			err: false,
+		},
+	}
+	for _, tt := range test {
+		t.Run(fmt.Sprintf("ApiCreate: %s", tt.name), func(t *testing.T) {
+			api := newAPI(cache)
+			op, err := api.Create(tt.input)
+			if tt.err {
+				assert.NotNil(t, err)
+			} else {
+				assert.Nil(t, err)
+				assert.Equalf(t, tt.result, op, "Operation should match")
+			}
+		})
+	}
+}
