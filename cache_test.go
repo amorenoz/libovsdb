@@ -3,12 +3,22 @@ package libovsdb
 import (
 	"testing"
 
+	"encoding/json"
 	"github.com/stretchr/testify/assert"
 )
 
+type testModel struct {
+	UUID string `ovs:"_uuid"`
+	Foo  string `ovs:"foo"`
+}
+
+func (d *testModel) Table() string {
+	return "Open_vSwitch"
+}
+
 func TestRowCache_Row(t *testing.T) {
 	type fields struct {
-		cache map[string]Row
+		cache map[string]Model
 	}
 	type args struct {
 		uuid string
@@ -17,17 +27,17 @@ func TestRowCache_Row(t *testing.T) {
 		name   string
 		fields fields
 		args   args
-		want   *Row
+		want   Model
 	}{
 		{
 			"returns a row that exists",
-			fields{cache: map[string]Row{"test": {}}},
+			fields{cache: map[string]Model{"test": &testModel{}}},
 			args{uuid: "test"},
-			&Row{},
+			&testModel{},
 		},
 		{
 			"returns a nil for a row that does not exist",
-			fields{cache: map[string]Row{"test": {}}},
+			fields{cache: map[string]Model{"test": &testModel{}}},
 			args{uuid: "foo"},
 			nil,
 		},
@@ -45,7 +55,7 @@ func TestRowCache_Row(t *testing.T) {
 
 func TestRowCache_Rows(t *testing.T) {
 	type fields struct {
-		cache map[string]Row
+		cache map[string]Model
 	}
 	tests := []struct {
 		name   string
@@ -53,8 +63,8 @@ func TestRowCache_Rows(t *testing.T) {
 		want   []string
 	}{
 		{
-			"returns a row that exist",
-			fields{cache: map[string]Row{"test1": {}, "test2": {}, "test3": {}}},
+			"returns a rows that exist",
+			fields{cache: map[string]Model{"test1": &testModel{}, "test2": &testModel{}, "test3": &testModel{}}},
 			[]string{"test1", "test2", "test3"},
 		},
 	}
@@ -72,13 +82,13 @@ func TestRowCache_Rows(t *testing.T) {
 func TestEventHandlerFuncs_OnAdd(t *testing.T) {
 	calls := 0
 	type fields struct {
-		AddFunc    func(table string, row Row)
-		UpdateFunc func(table string, old Row, new Row)
-		DeleteFunc func(table string, row Row)
+		AddFunc    func(table string, row Model)
+		UpdateFunc func(table string, old Model, new Model)
+		DeleteFunc func(table string, row Model)
 	}
 	type args struct {
 		table string
-		row   Row
+		row   Model
 	}
 	tests := []struct {
 		name   string
@@ -88,14 +98,14 @@ func TestEventHandlerFuncs_OnAdd(t *testing.T) {
 		{
 			"doesn't call nil function",
 			fields{nil, nil, nil},
-			args{"testTable", Row{}},
+			args{"testTable", &testModel{}},
 		},
 		{
 			"calls onadd function",
-			fields{func(string, Row) {
+			fields{func(string, Model) {
 				calls++
 			}, nil, nil},
-			args{"testTable", Row{}},
+			args{"testTable", &testModel{}},
 		},
 	}
 	for _, tt := range tests {
@@ -116,14 +126,14 @@ func TestEventHandlerFuncs_OnAdd(t *testing.T) {
 func TestEventHandlerFuncs_OnUpdate(t *testing.T) {
 	calls := 0
 	type fields struct {
-		AddFunc    func(table string, row Row)
-		UpdateFunc func(table string, old Row, new Row)
-		DeleteFunc func(table string, row Row)
+		AddFunc    func(table string, row Model)
+		UpdateFunc func(table string, old Model, new Model)
+		DeleteFunc func(table string, row Model)
 	}
 	type args struct {
 		table string
-		old   Row
-		new   Row
+		old   Model
+		new   Model
 	}
 	tests := []struct {
 		name   string
@@ -133,14 +143,14 @@ func TestEventHandlerFuncs_OnUpdate(t *testing.T) {
 		{
 			"doesn't call nil function",
 			fields{nil, nil, nil},
-			args{"testTable", Row{}, Row{}},
+			args{"testTable", &testModel{}, &testModel{}},
 		},
 		{
 			"calls onupdate function",
-			fields{nil, func(string, Row, Row) {
+			fields{nil, func(string, Model, Model) {
 				calls++
 			}, nil},
-			args{"testTable", Row{}, Row{}},
+			args{"testTable", &testModel{}, &testModel{}},
 		},
 	}
 	for _, tt := range tests {
@@ -161,13 +171,13 @@ func TestEventHandlerFuncs_OnUpdate(t *testing.T) {
 func TestEventHandlerFuncs_OnDelete(t *testing.T) {
 	calls := 0
 	type fields struct {
-		AddFunc    func(table string, row Row)
-		UpdateFunc func(table string, old Row, new Row)
-		DeleteFunc func(table string, row Row)
+		AddFunc    func(table string, row Model)
+		UpdateFunc func(table string, old Model, new Model)
+		DeleteFunc func(table string, row Model)
 	}
 	type args struct {
 		table string
-		row   Row
+		row   Model
 	}
 	tests := []struct {
 		name   string
@@ -177,14 +187,14 @@ func TestEventHandlerFuncs_OnDelete(t *testing.T) {
 		{
 			"doesn't call nil function",
 			fields{nil, nil, nil},
-			args{"testTable", Row{}},
+			args{"testTable", &testModel{}},
 		},
 		{
 			"calls ondelete function",
-			fields{nil, nil, func(string, Row) {
+			fields{nil, nil, func(string, Model) {
 				calls++
 			}},
-			args{"testTable", Row{}},
+			args{"testTable", &testModel{}},
 		},
 	}
 	for _, tt := range tests {
@@ -280,8 +290,27 @@ func TestTableCache_Tables(t *testing.T) {
 
 func TestTableCache_populate(t *testing.T) {
 	t.Log("Create")
-	tc := newTableCache()
+	db, err := NewDBModel("Open_vSwitch", []Model{&testModel{}})
+	assert.Nil(t, err)
+	var schema DatabaseSchema
+	err = json.Unmarshal([]byte(`
+		 {"name": "TestDB",
+		  "tables": {
+		    "Open_vSwitch": {
+		      "columns": {
+		        "foo": {
+			  "type": "string"
+			}
+		      }
+		    }
+		 }
+	     }
+	`), &schema)
+	assert.Nil(t, err)
+	tc := newTableCache(&schema, db)
+
 	testRow := Row{Fields: map[string]interface{}{"_uuid": "test", "foo": "bar"}}
+	testRowModel := &testModel{UUID: "test", Foo: "bar"}
 	updates := TableUpdates{
 		Updates: map[string]TableUpdate{
 			"Open_vSwitch": {
@@ -297,10 +326,11 @@ func TestTableCache_populate(t *testing.T) {
 	tc.populate(updates)
 
 	got := tc.cache["Open_vSwitch"].cache["test"]
-	assert.Equal(t, testRow, got)
+	assert.Equal(t, testRowModel, got)
 
 	t.Log("Update")
 	updatedRow := Row{Fields: map[string]interface{}{"_uuid": "test", "foo": "quux"}}
+	updatedRowModel := &testModel{UUID: "test", Foo: "quux"}
 	updates = TableUpdates{
 		Updates: map[string]TableUpdate{
 			"Open_vSwitch": {
@@ -316,7 +346,7 @@ func TestTableCache_populate(t *testing.T) {
 	tc.populate(updates)
 
 	got = tc.cache["Open_vSwitch"].cache["test"]
-	assert.Equal(t, updatedRow, got)
+	assert.Equal(t, updatedRowModel, got)
 
 	t.Log("Delete")
 	updates = TableUpdates{
@@ -345,14 +375,15 @@ func TestEventProcessor_AddEvent(t *testing.T) {
 		events = append(events, event{
 			table:     "bridge",
 			eventType: addEvent,
-			new: Row{
-				Fields: map[string]interface{}{"number": i},
+			new: &testModel{
+				UUID: "unique",
+				Foo:  "bar",
 			},
 		})
 	}
 	// overfill channel so event 16 is dropped
 	for _, e := range events {
-		ep.AddEvent(e.eventType, e.table, Row{}, e.new)
+		ep.AddEvent(e.eventType, e.table, nil, e.new)
 	}
 	// assert channel is full of events
 	assert.Equal(t, 16, len(ep.events))
@@ -360,7 +391,7 @@ func TestEventProcessor_AddEvent(t *testing.T) {
 	// read events and ensure they are in FIFO order
 	for i := 0; i < 16; i++ {
 		event := <-ep.events
-		assert.Equal(t, Row{Fields: map[string]interface{}{"number": i}}, event.new)
+		assert.Equal(t, &testModel{UUID: "unique", Foo: "bar"}, event.new)
 	}
 
 	// assert channel is empty

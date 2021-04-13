@@ -1,6 +1,7 @@
 package libovsdb
 
 import (
+	"fmt"
 	"reflect"
 	"sync"
 
@@ -14,18 +15,18 @@ const (
 	bufferSize  = 65536
 )
 
-// RowCache is a collections of Rows hashed by UUID
+// RowCache is a collections of Models hashed by UUID
 type RowCache struct {
-	cache map[string]Row
+	cache map[string]Model
 	mutex sync.RWMutex
 }
 
-// Row returns one row the from the cache by UUID
-func (r *RowCache) Row(uuid string) *Row {
+// Row returns one model from the cache by UUID
+func (r *RowCache) Row(uuid string) Model {
 	r.mutex.RLock()
 	defer r.mutex.RUnlock()
 	if row, ok := r.cache[uuid]; ok {
-		return &row
+		return row.(Model)
 	}
 	return nil
 }
@@ -43,41 +44,42 @@ func (r *RowCache) Rows() []string {
 
 func newRowCache() *RowCache {
 	return &RowCache{
-		cache: make(map[string]Row),
+		cache: make(map[string]Model),
+		mutex: sync.RWMutex{},
 	}
 }
 
 // EventHandler can handle events when the contents of the cache changes
 type EventHandler interface {
-	OnAdd(table string, row Row)
-	OnUpdate(table string, old Row, new Row)
-	OnDelete(table string, row Row)
+	OnAdd(table string, model Model)
+	OnUpdate(table string, old Model, new Model)
+	OnDelete(table string, model Model)
 }
 
 // EventHandlerFuncs is a wrapper for the EventHandler interface
 // It allows a caller to only implement the functions they need
 type EventHandlerFuncs struct {
-	AddFunc    func(table string, row Row)
-	UpdateFunc func(table string, old Row, new Row)
-	DeleteFunc func(table string, row Row)
+	AddFunc    func(table string, model Model)
+	UpdateFunc func(table string, old Model, new Model)
+	DeleteFunc func(table string, model Model)
 }
 
 // OnAdd calls AddFunc if it is not nil
-func (e *EventHandlerFuncs) OnAdd(table string, row Row) {
+func (e *EventHandlerFuncs) OnAdd(table string, model Model) {
 	if e.AddFunc != nil {
-		e.AddFunc(table, row)
+		e.AddFunc(table, model)
 	}
 }
 
 // OnUpdate calls UpdateFunc if it is not nil
-func (e *EventHandlerFuncs) OnUpdate(table string, old, new Row) {
+func (e *EventHandlerFuncs) OnUpdate(table string, old, new Model) {
 	if e.UpdateFunc != nil {
 		e.UpdateFunc(table, old, new)
 	}
 }
 
 // OnDelete calls DeleteFunc if it is not nil
-func (e *EventHandlerFuncs) OnDelete(table string, row Row) {
+func (e *EventHandlerFuncs) OnDelete(table string, row Model) {
 	if e.DeleteFunc != nil {
 		e.DeleteFunc(table, row)
 	}
@@ -89,13 +91,17 @@ type TableCache struct {
 	cache          map[string]*RowCache
 	cacheMutex     sync.RWMutex
 	eventProcessor *eventProcessor
+	orm            *orm
+	dbModel        *DBModel
 }
 
-func newTableCache() *TableCache {
+func newTableCache(schema *DatabaseSchema, dbModel *DBModel) *TableCache {
 	eventProcessor := newEventProcessor(bufferSize)
 	return &TableCache{
 		cache:          make(map[string]*RowCache),
 		eventProcessor: eventProcessor,
+		orm:            newORM(schema),
+		dbModel:        dbModel,
 	}
 }
 
@@ -147,11 +153,17 @@ func (t *TableCache) Disconnected() {
 
 // populate adds data to the cache and places an event on the channel
 func (t *TableCache) populate(tableUpdates TableUpdates) {
+	if t.orm == nil || t.dbModel == nil {
+		panic("TableCache without DatabaseModel cannot be populated")
+	}
 	t.cacheMutex.Lock()
 	defer t.cacheMutex.Unlock()
-	for table, updates := range tableUpdates.Updates {
+	for table := range t.dbModel.Types() {
+		updates, ok := tableUpdates.Updates[table]
+		if !ok {
+			continue
+		}
 		var tCache *RowCache
-		var ok bool
 		if tCache, ok = t.cache[table]; !ok {
 			t.cache[table] = newRowCache()
 			tCache = t.cache[table]
@@ -159,21 +171,33 @@ func (t *TableCache) populate(tableUpdates TableUpdates) {
 		tCache.mutex.Lock()
 		for uuid, row := range updates.Rows {
 			if !reflect.DeepEqual(row.New, Row{}) {
+				newModel, err := t.createModel(table, &row.New, uuid)
+				if err != nil {
+					panic(err)
+				}
 				if existing, ok := tCache.cache[uuid]; ok {
-					if !reflect.DeepEqual(row.New, existing) {
-						tCache.cache[uuid] = row.New
-						t.eventProcessor.AddEvent(updateEvent, table, row.Old, row.New)
+					if !reflect.DeepEqual(newModel, existing) {
+						tCache.cache[uuid] = newModel
+						oldModel, err := t.createModel(table, &row.Old, uuid)
+						if err != nil {
+							panic(err)
+						}
+						t.eventProcessor.AddEvent(updateEvent, table, oldModel, newModel)
 					}
 					// no diff
 					continue
 				}
-				tCache.cache[uuid] = row.New
-				t.eventProcessor.AddEvent(addEvent, table, row.Old, row.New)
+				tCache.cache[uuid] = newModel
+				t.eventProcessor.AddEvent(addEvent, table, nil, newModel)
 				continue
 			} else {
+				oldModel, err := t.createModel(table, &row.Old, uuid)
+				if err != nil {
+					panic(err)
+				}
 				// delete from cache
 				delete(tCache.cache, uuid)
-				t.eventProcessor.AddEvent(deleteEvent, table, row.Old, row.New)
+				t.eventProcessor.AddEvent(deleteEvent, table, oldModel, nil)
 				continue
 			}
 		}
@@ -195,8 +219,8 @@ func (t *TableCache) Run(stopCh <-chan struct{}) {
 type event struct {
 	eventType string
 	table     string
-	old       Row
-	new       Row
+	old       Model
+	new       Model
 }
 
 // eventProcessor handles the queueing and processing of cache events
@@ -227,7 +251,7 @@ func (e *eventProcessor) AddEventHandler(handler EventHandler) {
 }
 
 // AddEvent writes an event to the channel
-func (e *eventProcessor) AddEvent(eventType string, table string, old Row, new Row) {
+func (e *eventProcessor) AddEvent(eventType string, table string, old Model, new Model) {
 	// We don't need to check for error here since there
 	// is only a single writer. RPC is run in blocking mode
 	event := event{
@@ -269,4 +293,39 @@ func (e *eventProcessor) Run(stopCh <-chan struct{}) {
 			e.handlersMutex.Unlock()
 		}
 	}
+}
+
+// SetDatabaseModel configures the cache internally to enable Model parsing
+func (t *TableCache) SetDatabaseModel(schema *DatabaseSchema, model *DBModel) {
+	t.orm = newORM(schema)
+	t.dbModel = model
+}
+
+// createModel creates a new Model instance based on the Row information
+func (t *TableCache) createModel(tableName string, row *Row, uuid string) (Model, error) {
+	table := t.orm.schema.Table(tableName)
+	if table == nil {
+		return nil, fmt.Errorf("Table %s not found", tableName)
+	}
+	model, err := t.dbModel.newModel(tableName)
+	if err != nil {
+		return nil, err
+	}
+
+	err = t.orm.getRowData(tableName, row, model)
+	if err != nil {
+		return nil, err
+	}
+
+	if uuid != "" {
+		ormInfo, err := newORMInfo(table, model)
+		if err != nil {
+			return nil, err
+		}
+		if err := ormInfo.setField("_uuid", uuid); err != nil {
+			return nil, err
+		}
+	}
+
+	return model, nil
 }

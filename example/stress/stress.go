@@ -11,30 +11,46 @@ import (
 	"github.com/ovn-org/libovsdb"
 )
 
-var cpuprofile = flag.String("cpuprofile", "", "write cpu profile to this file")
-var memprofile = flag.String("memoryprofile", "", "write memory profile to this file")
-var nins = flag.Int("ninserts", 100, "insert this number of elements in the database")
-var verbose = flag.Bool("verbose", false, "Be verbose")
-var connection = flag.String("ovsdb", "unix:/var/run/openvswitch/db.sock", "OVSDB connection string")
+// ORMBridge is the simplified ORM model of the Bridge table
+type ormBridge struct {
+	UUID        string            `ovs:"_uuid"`
+	Name        string            `ovs:"name"`
+	OtherConfig map[string]string `ovs:"other_config"`
+	ExternalIds map[string]string `ovs:"external_ids"`
+	Ports       []string          `ovs:"ports"`
+	Status      map[string]string `ovs:"status"`
+}
+
+// Table returns the table name
+func (b *ormBridge) Table() string {
+	return "Bridge"
+}
 
 var (
+	cpuprofile = flag.String("cpuprofile", "", "write cpu profile to this file")
+	memprofile = flag.String("memoryprofile", "", "write memory profile to this file")
+	nins       = flag.Int("ninserts", 100, "insert this number of elements in the database")
+	verbose    = flag.Bool("verbose", false, "Be verbose")
+	connection = flag.String("ovsdb", "unix:/var/run/openvswitch/db.sock", "OVSDB connection string")
+	dbModel    *libovsdb.DBModel
+
 	rootUUID   string
 	insertions int
 	deletions  int
 )
 
 func run() {
-	ovs, err := libovsdb.Connect(*connection, "Open_vSwitch", nil)
+	ovs, err := libovsdb.Connect(*connection, dbModel, nil)
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer ovs.Disconnect()
 	ovs.Cache.AddEventHandler(
 		&libovsdb.EventHandlerFuncs{
-			AddFunc: func(table string, row libovsdb.Row) {
+			AddFunc: func(table string, model libovsdb.Model) {
 				insertions++
 			},
-			DeleteFunc: func(table string, row libovsdb.Row) {
+			DeleteFunc: func(table string, model libovsdb.Model) {
 				deletions++
 			},
 		},
@@ -172,6 +188,7 @@ func createBridge(ovs *libovsdb.OvsdbClient, iter int) {
 }
 func main() {
 	flag.Parse()
+	var err error
 	if *cpuprofile != "" {
 		f, err := os.Create(*cpuprofile)
 		if err != nil {
@@ -181,6 +198,11 @@ func main() {
 			log.Fatal(err)
 		}
 		defer pprof.StopCPUProfile()
+	}
+
+	dbModel, err = libovsdb.NewDBModel("Open_vSwitch", []libovsdb.Model{&ormBridge{}})
+	if err != nil {
+		log.Fatal(err)
 	}
 
 	run()

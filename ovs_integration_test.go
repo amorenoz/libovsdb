@@ -12,8 +12,9 @@ import (
 const (
 	defOvsRunDir = "/var/run/openvswitch"
 	defOvsSocket = "db.sock"
-	defDB        = "Open_vSwitch"
 )
+
+var defDB = &DBModel{name: "Open_vSwitch"}
 
 var cfg *Config
 

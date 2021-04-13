@@ -14,17 +14,43 @@ const (
 	ovsTable    = "Open_vSwitch"
 )
 
+// ORMBridge is the simplified ORM model of the Bridge table
+type ormBridge struct {
+	UUID        string            `ovs:"_uuid"`
+	Name        string            `ovs:"name"`
+	OtherConfig map[string]string `ovs:"other_config"`
+	ExternalIds map[string]string `ovs:"external_ids"`
+	Ports       []string          `ovs:"ports"`
+	Status      map[string]string `ovs:"status"`
+}
+
+// Table returns the table name
+func (b *ormBridge) Table() string {
+	return bridgeTable
+}
+
+// ORMOVS is the simplified ORM model of the Open_vSwitch table
+type ormOvs struct {
+	UUID string `ovs:"_uuid"`
+}
+
+// Table returns the table name
+func (b *ormOvs) Table() string {
+	return ovsTable
+}
+
 var quit chan bool
-var update chan libovsdb.Row
+var update chan libovsdb.Model
+
 var rootUUID string
 
 func play(ovs *libovsdb.OvsdbClient) {
 	go processInput(ovs)
-	for row := range update {
-		if _, ok := row.Fields["name"]; ok {
-			name := row.Fields["name"].(string)
-			if name == "stop" {
-				fmt.Println("Bridge stop detected")
+	for model := range update {
+		if model.Table() == bridgeTable {
+			bridge := model.(*ormBridge)
+			if bridge.Name == "stop" {
+				fmt.Printf("Bridge stop detected: %+v\n", *bridge)
 				ovs.Disconnect()
 				quit <- true
 			}
@@ -95,9 +121,14 @@ func processInput(ovs *libovsdb.OvsdbClient) {
 
 func main() {
 	quit = make(chan bool)
-	update = make(chan libovsdb.Row)
+	update = make(chan libovsdb.Model)
+
+	dbmodel, err := libovsdb.NewDBModel("Open_vSwitch", []libovsdb.Model{&ormBridge{}, &ormOvs{}})
+	if err != nil {
+		log.Fatal("Unable to create DB model ", err)
+	}
 	// By default libovsdb connects to 127.0.0.0:6400.
-	ovs, err := libovsdb.Connect("tcp:", ovsTable, nil)
+	ovs, err := libovsdb.Connect("tcp:", dbmodel, nil)
 
 	// If you prefer to connect to OVS in a specific location :
 	// ovs, err := libovsdb.Connect("tcp:192.168.56.101:6640", nil)
@@ -107,9 +138,9 @@ func main() {
 	}
 
 	ovs.Cache.AddEventHandler(&libovsdb.EventHandlerFuncs{
-		AddFunc: func(table string, row libovsdb.Row) {
+		AddFunc: func(table string, model libovsdb.Model) {
 			if table == bridgeTable {
-				update <- row
+				update <- model
 			}
 		},
 	})
