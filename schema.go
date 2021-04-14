@@ -231,7 +231,9 @@ func (column *ColumnSchema) UnmarshalJSON(data []byte) error {
 		Ephemeral  bool            `json:"ephemeral,omitempty"`
 		Mutable    bool            `json:"mutable,omitempty"`
 	}
-	var colJSON ColumnJSON
+	colJSON := ColumnJSON{
+		Mutable: true,
+	}
 
 	// Unmarshall known keys
 	if err := json.Unmarshal(data, &colJSON); err != nil {

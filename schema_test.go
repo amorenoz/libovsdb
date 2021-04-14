@@ -36,7 +36,8 @@ func TestSchema(t *testing.T) {
 			  "type": "real"
 			},
 		        "uuid": {
-			  "type": "uuid"
+			  "type": "uuid",
+			  "mutable": false
 			}
 		      }
 		    }
@@ -50,16 +51,20 @@ func TestSchema(t *testing.T) {
 					"atomicTable": {
 						Columns: map[string]*ColumnSchema{
 							"str": {
-								Type: TypeString,
+								Type:    TypeString,
+								Mutable: true,
 							},
 							"int": {
-								Type: TypeInteger,
+								Type:    TypeInteger,
+								Mutable: true,
 							},
 							"float": {
-								Type: TypeReal,
+								Type:    TypeReal,
+								Mutable: true,
 							},
 							"uuid": {
-								Type: TypeUUID,
+								Type:    TypeUUID,
+								Mutable: false,
 							},
 						},
 					},
@@ -124,7 +129,8 @@ func TestSchema(t *testing.T) {
 					"setTable": {
 						Columns: map[string]*ColumnSchema{
 							"single": {
-								Type: TypeString,
+								Type:    TypeString,
+								Mutable: true,
 								TypeObj: &ColumnType{
 									Key: &BaseType{Type: "string"},
 									Max: 1,
@@ -132,7 +138,8 @@ func TestSchema(t *testing.T) {
 								},
 							},
 							"oneElem": {
-								Type: TypeSet,
+								Type:    TypeSet,
+								Mutable: true,
 								TypeObj: &ColumnType{
 									Key: &BaseType{Type: "uuid"},
 									Max: 1,
@@ -140,7 +147,8 @@ func TestSchema(t *testing.T) {
 								},
 							},
 							"multipleElem": {
-								Type: TypeSet,
+								Type:    TypeSet,
+								Mutable: true,
 								TypeObj: &ColumnType{
 									Key: &BaseType{Type: "real"},
 									Max: 2,
@@ -148,7 +156,8 @@ func TestSchema(t *testing.T) {
 								},
 							},
 							"unlimitedElem": {
-								Type: TypeSet,
+								Type:    TypeSet,
+								Mutable: true,
 								TypeObj: &ColumnType{
 									Key: &BaseType{Type: "integer"},
 									Max: Unlimited,
@@ -156,7 +165,8 @@ func TestSchema(t *testing.T) {
 								},
 							},
 							"enumSet": {
-								Type: TypeSet,
+								Type:    TypeSet,
+								Mutable: true,
 								TypeObj: &ColumnType{
 									Key: &BaseType{
 										Type: "string",
@@ -224,7 +234,8 @@ func TestSchema(t *testing.T) {
 					"mapTable": {
 						Columns: map[string]*ColumnSchema{
 							"str_str": {
-								Type: TypeMap,
+								Type:    TypeMap,
+								Mutable: true,
 								TypeObj: &ColumnType{
 									Key:   &BaseType{Type: "string"},
 									Value: &BaseType{Type: "string"},
@@ -233,7 +244,8 @@ func TestSchema(t *testing.T) {
 								},
 							},
 							"str_int": {
-								Type: TypeMap,
+								Type:    TypeMap,
+								Mutable: true,
 								TypeObj: &ColumnType{
 									Key:   &BaseType{Type: "string"},
 									Value: &BaseType{Type: "integer"},
@@ -242,7 +254,8 @@ func TestSchema(t *testing.T) {
 								},
 							},
 							"int_real": {
-								Type: TypeMap,
+								Type:    TypeMap,
+								Mutable: true,
 								TypeObj: &ColumnType{
 									Key:   &BaseType{Type: "integer"},
 									Value: &BaseType{Type: "real"},
@@ -251,7 +264,8 @@ func TestSchema(t *testing.T) {
 								},
 							},
 							"str_uuid": {
-								Type: TypeMap,
+								Type:    TypeMap,
+								Mutable: true,
 								TypeObj: &ColumnType{
 									Key:   &BaseType{Type: "string"},
 									Value: &BaseType{Type: "uuid"},
@@ -260,7 +274,8 @@ func TestSchema(t *testing.T) {
 								},
 							},
 							"str_enum": {
-								Type: TypeMap,
+								Type:    TypeMap,
+								Mutable: true,
 								TypeObj: &ColumnType{
 									Key: &BaseType{
 										Type: "string",

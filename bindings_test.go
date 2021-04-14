@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"reflect"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
 type Transformation map[string]interface{}
@@ -688,6 +690,211 @@ func TestIsDefault(t *testing.T) {
 				t.Logf("Conversion schema %v", string(test.column))
 			}
 
+		})
+	}
+}
+
+func TestMutationValidation(t *testing.T) {
+	type Test struct {
+		name     string
+		column   []byte
+		mutators []string
+		value    interface{}
+		valid    bool
+	}
+	tests := []Test{
+		{
+			name:     "string",
+			column:   []byte(`{"type":"string"}`),
+			mutators: []string{"+=", "+=", "-=", "*=", "/=", "%="},
+			value:    "foo",
+			valid:    false,
+		},
+		{
+			name:     "string",
+			column:   []byte(`{"type":"uuid"}`),
+			mutators: []string{"+=", "+=", "-=", "*=", "/=", "%="},
+			value:    "foo",
+			valid:    false,
+		},
+		{
+			name:     "boolean",
+			column:   []byte(`{"type":"boolean"}`),
+			mutators: []string{"+=", "+=", "-=", "*=", "/=", "%="},
+			value:    true,
+			valid:    false,
+		},
+		{
+			name:     "integer",
+			column:   []byte(`{"type":"integer"}`),
+			mutators: []string{"+=", "+=", "-=", "*=", "/=", "%="},
+			value:    4,
+			valid:    true,
+		},
+		{
+			name:     "unmutable",
+			column:   []byte(`{"type":"integer", "mutable": false}`),
+			mutators: []string{"+=", "+=", "-=", "*=", "/=", "%="},
+			value:    4,
+			valid:    false,
+		},
+		{
+			name:     "integer wrong mutator",
+			column:   []byte(`{"type":"integer"}`),
+			mutators: []string{"some", "wrong", "mutator"},
+			value:    4,
+			valid:    false,
+		},
+		{
+			name:     "integer wrong type",
+			column:   []byte(`{"type":"integer"}`),
+			mutators: []string{"+=", "+=", "-=", "*=", "/=", "%="},
+			value:    "foo",
+			valid:    false,
+		},
+		{
+			name:     "real",
+			column:   []byte(`{"type":"real"}`),
+			mutators: []string{"+=", "+=", "-=", "*=", "/="},
+			value:    4.0,
+			valid:    true,
+		},
+		{
+			name:     "real-%/",
+			column:   []byte(`{"type":"real"}`),
+			mutators: []string{"%="},
+			value:    4.0,
+			valid:    false,
+		},
+		{
+			name: "integer set",
+			column: []byte(`{
+				   "type": {
+				     "key": "integer",
+				     "max": "unlimited",
+				     "min": 0
+				   }
+				 }`),
+			mutators: []string{"+=", "+=", "-=", "*=", "/=", "%="},
+			value:    4,
+			valid:    true,
+		},
+		{
+			name: "float set /",
+			column: []byte(`{
+				   "type": {
+				     "key": "real",
+				     "max": "unlimited",
+				     "min": 0
+				   }
+				 }`),
+			mutators: []string{"+=", "+=", "-=", "*=", "/="},
+			value:    4.0,
+			valid:    true,
+		},
+		{
+			name: "string set wrong mutator",
+			column: []byte(`{
+				   "type": {
+				     "key": "real",
+				     "max": "unlimited",
+				     "min": 0
+				   }
+				 }`),
+			mutators: []string{"+=", "+=", "-=", "*="},
+			value:    "foo",
+			valid:    false,
+		},
+		{
+			name: "string set insert/delete",
+			column: []byte(`{
+				   "type": {
+				     "key": "string",
+				     "max": "unlimited",
+				     "min": 0
+				   }
+				 }`),
+			mutators: []string{"insert", "delete"},
+			value:    []string{"foo", "bar"},
+			valid:    true,
+		},
+		{
+			name: "integer set insert/delete",
+			column: []byte(`{
+				   "type": {
+				     "key": "integer",
+				     "max": "unlimited",
+				     "min": 0
+				   }
+				 }`),
+			mutators: []string{"insert", "delete"},
+			value:    []int{45, 11},
+			valid:    true,
+		},
+		{
+			name: "map insert, wrong type",
+			column: []byte(`{
+				   "type": {
+				     "key": "string",
+				     "value": "string"
+				   }
+				 }`),
+			mutators: []string{"insert"},
+			value:    []string{"foo"},
+			valid:    false,
+		},
+		{
+			name: "map insert",
+			column: []byte(`{
+				   "type": {
+				     "key": "string",
+				     "value": "string"
+				   }
+				 }`),
+			mutators: []string{"insert"},
+			value:    map[string]string{"foo": "bar"},
+			valid:    true,
+		},
+		{
+			name: "map delete k-v",
+			column: []byte(`{
+				   "type": {
+				     "key": "string",
+				     "value": "string"
+				   }
+				 }`),
+			mutators: []string{"delete"},
+			value:    map[string]string{"foo": "bar"},
+			valid:    true,
+		},
+		{
+			name: "map delete k set",
+			column: []byte(`{
+				   "type": {
+				     "key": "string",
+				     "value": "string"
+				   }
+				 }`),
+			mutators: []string{"delete"},
+			value:    []string{"foo", "bar"},
+			valid:    true,
+		},
+	}
+	for _, test := range tests {
+		t.Run(fmt.Sprintf("MutationValidation: %s", test.name), func(t *testing.T) {
+			var column ColumnSchema
+			if err := json.Unmarshal(test.column, &column); err != nil {
+				t.Fatal(err)
+			}
+
+			for _, m := range test.mutators {
+				result := validateMutation(&column, m, test.value)
+				if test.valid {
+					assert.Nil(t, result)
+				} else {
+					assert.NotNil(t, result)
+				}
+			}
 		})
 	}
 }
