@@ -247,6 +247,50 @@ func (o orm) equalFields(tableName string, one, other interface{}, fields ...int
 	return o.equalIndexes(table, one, other, indexes...)
 }
 
+// newMutation creates a RFC7047 mutation object based on an ORM object and the mutation fields (in native format)
+// It takes care of field validation against the column type
+func (o orm) newMutation(tableName string, data interface{}, column, mutator string, value interface{}) ([]interface{}, error) {
+	table := o.schema.Table(tableName)
+	if table == nil {
+		return nil, NewErrNoTable(tableName)
+	}
+
+	ormInfo, err := newORMInfo(table, data)
+	if err != nil {
+		return nil, err
+	}
+
+	// Check the column exists in the object
+	if !ormInfo.hasColumn(column) {
+		return nil, fmt.Errorf("Mutation contains column %s that does not exist in object %v", column, data)
+	}
+	// Check that the mutation is valid
+	columnSchema := table.Column(column)
+	if columnSchema == nil {
+		return nil, fmt.Errorf("Column %s not found", column)
+	}
+	if err := validateMutation(columnSchema, mutator, value); err != nil {
+		return nil, err
+	}
+
+	var ovsValue interface{}
+	if mutator == "delete" && columnSchema.Type == TypeMap {
+		// It's OK to cast the value to a list of elemets because validation has passed
+		ovsSet, err := NewOvsSet(value)
+		if err != nil {
+			return nil, err
+		}
+		ovsValue = ovsSet
+	} else {
+		ovsValue, err = NativeToOvs(columnSchema, value)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	return []interface{}{column, mutator, ovsValue}, nil
+}
+
 // equalIndexes returns whether both models are equal from the DB point of view
 // Two objectes are considered equal if any of the following conditions is true
 // They have a field tagged with column name '_uuid' and their values match

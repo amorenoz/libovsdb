@@ -826,3 +826,154 @@ func TestORMEqualIndexes(t *testing.T) {
 	assert.NotNil(t, err)
 
 }
+
+func TestORMMutation(t *testing.T) {
+
+	var testSchema = []byte(`{
+  "cksum": "223619766 22548",
+  "name": "TestSchema",
+  "tables": {
+    "TestTable": {
+      "columns": {
+        "string": {
+          "type": "string"
+        },
+        "set": {
+          "type": {
+            "key": "string",
+            "min": 0
+          }
+        },
+        "map": {
+          "type": {
+            "key": "string",
+            "value": "string"
+          }
+        },
+        "unmutable": {
+	  "mutable": false,
+          "type": {
+            "key": "integer"
+          }
+	},
+        "int": {
+          "type": {
+            "key": "integer"
+          }
+	}
+      }
+    }
+  }
+}`)
+	type testType struct {
+		UUID      string            `ovs:"_uuid"`
+		String    string            `ovs:"string"`
+		Set       []string          `ovs:"set"`
+		Map       map[string]string `ovs:"map"`
+		Int       int               `ovs:"int"`
+		UnMutable int               `ovs:"unmutable"`
+	}
+
+	var schema DatabaseSchema
+	if err := json.Unmarshal(testSchema, &schema); err != nil {
+		t.Fatal(err)
+	}
+	orm := newORM(&schema)
+
+	type Test struct {
+		name     string
+		column   string
+		obj      testType
+		expected []interface{}
+		mutator  string
+		value    interface{}
+		err      bool
+	}
+	tests := []Test{
+		{
+			name:    "string",
+			column:  "string",
+			obj:     testType{},
+			mutator: "+=",
+			err:     true,
+		},
+		{
+			name:     "Increment integer",
+			column:   "int",
+			obj:      testType{},
+			mutator:  "+=",
+			value:    1,
+			expected: []interface{}{"int", "+=", 1},
+			err:      false,
+		},
+		{
+			name:     "Increment integer",
+			column:   "int",
+			obj:      testType{},
+			mutator:  "%=",
+			value:    2,
+			expected: []interface{}{"int", "%=", 2},
+			err:      false,
+		},
+		{
+			name:    "non-mutable",
+			column:  "unmutable",
+			obj:     testType{},
+			mutator: "-=",
+			value:   2,
+			err:     true,
+		},
+		{
+			name:     "Add elemet to set ",
+			column:   "set",
+			obj:      testType{},
+			mutator:  "insert",
+			value:    []string{"foo"},
+			expected: []interface{}{"set", "insert", testOvsSet(t, []string{"foo"})},
+			err:      false,
+		},
+		{
+			name:     "Delete element from set ",
+			column:   "set",
+			obj:      testType{},
+			mutator:  "delete",
+			value:    []string{"foo"},
+			expected: []interface{}{"set", "delete", testOvsSet(t, []string{"foo"})},
+			err:      false,
+		},
+		{
+			name:     "Delete elements from map ",
+			column:   "map",
+			obj:      testType{},
+			mutator:  "delete",
+			value:    []string{"foo", "bar"},
+			expected: []interface{}{"map", "delete", testOvsSet(t, []string{"foo", "bar"})},
+			err:      false,
+		},
+		{
+			name:     "Insert elements in map ",
+			column:   "map",
+			obj:      testType{},
+			mutator:  "insert",
+			value:    map[string]string{"foo": "bar"},
+			expected: []interface{}{"map", "insert", testOvsMap(t, map[string]string{"foo": "bar"})},
+			err:      false,
+		},
+	}
+	for _, test := range tests {
+		t.Run(fmt.Sprintf("newMutation%s", test.name), func(t *testing.T) {
+			mutation, err := orm.newMutation("TestTable", &test.obj, test.column, test.mutator, test.value)
+			if test.err {
+				if err == nil {
+					t.Errorf("Expected an error but got none")
+				}
+			} else {
+				if err != nil {
+					t.Error(err)
+				}
+			}
+
+			assert.Equalf(t, test.expected, mutation, "Mutation must match expected")
+		})
+	}
+}
