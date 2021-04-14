@@ -548,3 +548,160 @@ func TestAPICreate(t *testing.T) {
 		})
 	}
 }
+
+func TestAPIMutate(t *testing.T) {
+	cache := apiTestCache(t)
+	lspCache := map[string]Model{
+		aUUID0: &testLogicalSwitchPort{
+			UUID:        aUUID0,
+			Name:        "lsp0",
+			Type:        "someType",
+			ExternalIds: map[string]string{"foo": "bar"},
+			Enabled:     []bool{true},
+			Tag:         []int{1},
+		},
+		aUUID1: &testLogicalSwitchPort{
+			UUID:        aUUID1,
+			Name:        "lsp1",
+			Type:        "someType",
+			ExternalIds: map[string]string{"foo": "baz"},
+			Tag:         []int{1},
+		},
+		aUUID2: &testLogicalSwitchPort{
+			UUID:        aUUID2,
+			Name:        "lsp2",
+			Type:        "someOtherType",
+			ExternalIds: map[string]string{"foo": "baz"},
+			Tag:         []int{1},
+		},
+	}
+	cache.cache["Logical_Switch_Port"] = &RowCache{cache: lspCache}
+
+	testObj := testLogicalSwitchPort{}
+
+	test := []struct {
+		name      string
+		condition func(API) ConditionalAPI
+		model     Model
+		mutations []Mutation
+		init      map[string]Model
+		result    []Operation
+		err       bool
+	}{
+		{
+			name: "select by UUID addElement to set",
+			condition: func(a API) ConditionalAPI {
+				return a.Where(&testLogicalSwitch{
+					UUID: aUUID0,
+				})
+			},
+			mutations: []Mutation{
+				{
+					Field:   &testObj.Tag,
+					Mutator: "insert",
+					Value:   []int{5},
+				},
+			},
+			result: []Operation{
+				{
+					Op:        opMutate,
+					Table:     "Logical_Switch_Port",
+					Mutations: []interface{}{[]interface{}{"tag", "insert", testOvsSet(t, []int{5})}},
+					Where:     []interface{}{[]interface{}{"_uuid", "==", UUID{aUUID0}}},
+				},
+			},
+			err: false,
+		},
+		{
+			name: "select by name delete element from map",
+			condition: func(a API) ConditionalAPI {
+				return a.Where(&testLogicalSwitchPort{
+					Name: "lsp2",
+				})
+			},
+			mutations: []Mutation{
+				{
+					Field:   &testObj.ExternalIds,
+					Mutator: "delete",
+					Value:   []string{"foo"},
+				},
+			},
+			result: []Operation{
+				{
+					Op:        opMutate,
+					Table:     "Logical_Switch_Port",
+					Mutations: []interface{}{[]interface{}{"external_ids", "delete", testOvsSet(t, []string{"foo"})}},
+					Where:     []interface{}{[]interface{}{"name", "==", "lsp2"}},
+				},
+			},
+			err: false,
+		},
+		{
+			name: "select single by predicate name insert element in map",
+			condition: func(a API) ConditionalAPI {
+				return a.Where(func(lsp *testLogicalSwitchPort) bool {
+					return lsp.Name == "lsp2"
+				})
+			},
+			mutations: []Mutation{
+				{
+					Field:   &testObj.ExternalIds,
+					Mutator: "insert",
+					Value:   map[string]string{"bar": "baz"},
+				},
+			},
+			result: []Operation{
+				{
+					Op:        opMutate,
+					Table:     "Logical_Switch_Port",
+					Mutations: []interface{}{[]interface{}{"external_ids", "insert", testOvsMap(t, map[string]string{"bar": "baz"})}},
+					Where:     []interface{}{[]interface{}{"_uuid", "==", UUID{aUUID2}}},
+				},
+			},
+			err: false,
+		},
+		{
+			name: "select many by predicate name insert element in map",
+			condition: func(a API) ConditionalAPI {
+				return a.Where(func(lsp *testLogicalSwitchPort) bool {
+					return lsp.Type == "someType"
+				})
+			},
+			mutations: []Mutation{
+				{
+					Field:   &testObj.ExternalIds,
+					Mutator: "insert",
+					Value:   map[string]string{"bar": "baz"},
+				},
+			},
+			result: []Operation{
+				{
+					Op:        opMutate,
+					Table:     "Logical_Switch_Port",
+					Mutations: []interface{}{[]interface{}{"external_ids", "insert", testOvsMap(t, map[string]string{"bar": "baz"})}},
+					Where:     []interface{}{[]interface{}{"_uuid", "==", UUID{aUUID0}}},
+				},
+				{
+					Op:        opMutate,
+					Table:     "Logical_Switch_Port",
+					Mutations: []interface{}{[]interface{}{"external_ids", "insert", testOvsMap(t, map[string]string{"bar": "baz"})}},
+					Where:     []interface{}{[]interface{}{"_uuid", "==", UUID{aUUID1}}},
+				},
+			},
+			err: false,
+		},
+	}
+	for _, tt := range test {
+		t.Run(fmt.Sprintf("ApiMutate: %s", tt.name), func(t *testing.T) {
+			api := newAPI(cache)
+			cond := tt.condition(api)
+			ops, err := cond.Mutate(&testObj, tt.mutations)
+			if tt.err {
+				assert.NotNil(t, err)
+			} else {
+				assert.Nil(t, err)
+				assert.Equalf(t, tt.result, ops, "Operations should match")
+			}
+		})
+	}
+}
