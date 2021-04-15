@@ -31,7 +31,8 @@ func (b *ormBridge) Table() string {
 
 // ORMOVS is the simplified ORM model of the Open_vSwitch table
 type ormOvs struct {
-	UUID string `ovs:"_uuid"`
+	UUID    string   `ovs:"_uuid"`
+	Bridges []string `ovs:"bridges"`
 }
 
 // Table returns the table name
@@ -68,34 +69,29 @@ func play(ovs *libovsdb.OvsdbClient) {
 }
 
 func createBridge(ovs *libovsdb.OvsdbClient, bridgeName string) {
-	namedUUID := "gopher"
-	// bridge row to insert
-	bridge := make(map[string]interface{})
-	bridge["name"] = bridgeName
-
-	// simple insert operation
-	insertOp := libovsdb.Operation{
-		Op:       "insert",
-		Table:    bridgeTable,
-		Row:      bridge,
-		UUIDName: namedUUID,
+	bridge := ormBridge{
+		UUID: "gopher",
+		Name: bridgeName,
+	}
+	insertOp, err := ovs.API.Create(&bridge)
+	if err != nil {
+		log.Fatal(err)
 	}
 
-	uuidParameter := libovsdb.UUID{GoUUID: rootUUID}
-	mutateUUID := []libovsdb.UUID{{GoUUID: namedUUID}}
-	mutateSet, _ := libovsdb.NewOvsSet(mutateUUID)
-	mutation := libovsdb.NewMutation("bridges", "insert", mutateSet)
-	condition := libovsdb.NewCondition("_uuid", "==", uuidParameter)
-
-	// simple mutate operation
-	mutateOp := libovsdb.Operation{
-		Op:        "mutate",
-		Table:     ovsTable,
-		Mutations: []interface{}{mutation},
-		Where:     []interface{}{condition},
+	ovsRow := ormOvs{
+		UUID: rootUUID,
+	}
+	mutateOps, err := ovs.API.Where(&ovsRow).Mutate(&ovsRow, []libovsdb.Mutation{
+		{
+			Field:   &ovsRow.Bridges,
+			Mutator: "insert",
+			Value:   []string{bridge.UUID},
+		}})
+	if err != nil {
+		log.Fatal(err)
 	}
 
-	operations := []libovsdb.Operation{insertOp, mutateOp}
+	operations := []libovsdb.Operation{*insertOp, mutateOps[0]}
 	reply, err := ovs.Transact(operations...)
 	if err != nil {
 		log.Fatal(err)
@@ -124,6 +120,9 @@ func processInput(ovs *libovsdb.OvsdbClient) {
 		fmt.Printf("\n Enter a Bridge Name : ")
 		var bridgeName string
 		fmt.Scanf("%s", &bridgeName)
+		if bridgeName == "" {
+			continue
+		}
 		createBridge(ovs, bridgeName)
 	}
 }
@@ -137,7 +136,7 @@ func main() {
 		log.Fatal("Unable to create DB model ", err)
 	}
 	// By default libovsdb connects to 127.0.0.0:6400.
-	ovs, err := libovsdb.Connect("tcp:", dbmodel, nil)
+	ovs, err := libovsdb.Connect("tcp:0.0.0.0:32768", dbmodel, nil)
 
 	// If you prefer to connect to OVS in a specific location :
 	// ovs, err := libovsdb.Connect("tcp:192.168.56.101:6640", nil)
