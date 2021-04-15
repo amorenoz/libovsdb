@@ -9,6 +9,7 @@ import (
 const (
 	opInsert string = "insert"
 	opMutate string = "mutate"
+	opUpdate string = "insert"
 )
 
 // API defines basic operations to interact with the database
@@ -54,6 +55,13 @@ type ConditionalAPI interface {
 	// By the model and the list of Mutation objects
 	// Depending on the Condition, it might return one or many operations
 	Mutate(Model, []Mutation) ([]Operation, error)
+
+	// Update returns the operations needed to update any number of rows according
+	// to the data in the given model.
+	// By default, all the non-default values contained in model will be updated.
+	// Optional fields can be passed (pointer to fields in the model) to select the
+	// the fields to be updated
+	Update(Model, ...interface{}) ([]Operation, error)
 }
 
 // Mutation is a type that represents a OVSDB Mutation
@@ -314,6 +322,36 @@ func (a api) Mutate(model Model, mutationObjs []Mutation) ([]Operation, error) {
 	return operations, nil
 }
 
+// Update is a generic function capable of updating any field in any row in the database
+// Additional fields can be passed (variadic opts) to indicate fields to be updated
+func (a api) Update(model Model, fields ...interface{}) ([]Operation, error) {
+	var operations []Operation
+	table, err := a.getTableFromModel(model)
+	if err != nil {
+		return nil, err
+	}
+
+	conditions, err := a.cond.generate()
+	if err != nil {
+		return nil, err
+	}
+
+	row, err := a.cache.orm.newRow(table, model, fields...)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, condition := range conditions {
+		operations = append(operations, Operation{
+			Op:    opUpdate,
+			Table: table,
+			Row:   row,
+			Where: condition,
+		})
+	}
+	return operations, nil
+}
+
 // getTableFromModel returns the table name from a Model object after performing
 // type verifications on the model
 func (a api) getTableFromModel(model interface{}) (string, error) {
@@ -388,5 +426,10 @@ func (e errorApi) Where(arg interface{}, extra ...interface{}) ConditionalAPI {
 
 // Mutate returns the error
 func (e errorApi) Mutate(Model, []Mutation) ([]Operation, error) {
+	return nil, e.err
+}
+
+// Update returns the error
+func (e errorApi) Update(Model, ...interface{}) ([]Operation, error) {
 	return nil, e.err
 }

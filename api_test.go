@@ -705,3 +705,156 @@ func TestAPIMutate(t *testing.T) {
 		})
 	}
 }
+
+func TestAPIUpdate(t *testing.T) {
+	cache := apiTestCache(t)
+	lspCache := map[string]Model{
+		aUUID0: &testLogicalSwitchPort{
+			UUID:        aUUID0,
+			Name:        "lsp0",
+			Type:        "someType",
+			ExternalIds: map[string]string{"foo": "bar"},
+			Enabled:     []bool{true},
+			Tag:         []int{1},
+		},
+		aUUID1: &testLogicalSwitchPort{
+			UUID:        aUUID1,
+			Name:        "lsp1",
+			Type:        "someType",
+			ExternalIds: map[string]string{"foo": "baz"},
+			Tag:         []int{1},
+			Enabled:     []bool{true},
+		},
+		aUUID2: &testLogicalSwitchPort{
+			UUID:        aUUID2,
+			Name:        "lsp2",
+			Type:        "someOtherType",
+			ExternalIds: map[string]string{"foo": "baz"},
+			Tag:         []int{1},
+		},
+	}
+	cache.cache["Logical_Switch_Port"] = &RowCache{cache: lspCache}
+
+	testObj := testLogicalSwitchPort{}
+
+	test := []struct {
+		name      string
+		condition func(API) ConditionalAPI
+		prepare   func(t *testLogicalSwitchPort)
+		fields    []interface{}
+		result    []Operation
+		err       bool
+	}{
+		{
+			name: "select by UUID change multiple field",
+			condition: func(a API) ConditionalAPI {
+				return a.Where(&testLogicalSwitch{
+					UUID: aUUID0,
+				})
+			},
+			prepare: func(t *testLogicalSwitchPort) {
+				t.Type = "somethingElse"
+				t.Tag = []int{6}
+			},
+			fields: []interface{}{},
+			result: []Operation{
+				{
+					Op:    opUpdate,
+					Table: "Logical_Switch_Port",
+					Row:   map[string]interface{}{"type": "somethingElse", "tag": testOvsSet(t, []int{6})},
+					Where: []interface{}{[]interface{}{"_uuid", "==", UUID{aUUID0}}},
+				},
+			},
+			err: false,
+		},
+		{
+			name: "select by index change multiple field",
+			condition: func(a API) ConditionalAPI {
+				return a.Where(&testLogicalSwitchPort{
+					Name: "lsp1",
+				})
+			},
+			prepare: func(t *testLogicalSwitchPort) {
+				t.Type = "somethingElse"
+				t.Tag = []int{6}
+			},
+			fields: []interface{}{},
+			result: []Operation{
+				{
+					Op:    opUpdate,
+					Table: "Logical_Switch_Port",
+					Row:   map[string]interface{}{"type": "somethingElse", "tag": testOvsSet(t, []int{6})},
+					Where: []interface{}{[]interface{}{"name", "==", "lsp1"}},
+				},
+			},
+			err: false,
+		},
+		{
+			name: "select by field change multiple field",
+			condition: func(a API) ConditionalAPI {
+				t := testLogicalSwitchPort{
+					Type:    "sometype",
+					Enabled: []bool{true},
+				}
+				return a.Where(&t, &t.Type)
+			},
+			prepare: func(t *testLogicalSwitchPort) {
+				t.Tag = []int{6}
+			},
+			fields: []interface{}{},
+			result: []Operation{
+				{
+					Op:    opUpdate,
+					Table: "Logical_Switch_Port",
+					Row:   map[string]interface{}{"tag": testOvsSet(t, []int{6})},
+					Where: []interface{}{[]interface{}{"type", "==", "sometype"}},
+				},
+			},
+			err: false,
+		},
+		{
+			name: "select multiple by predicate change multiple field",
+			condition: func(a API) ConditionalAPI {
+				return a.Where(func(t *testLogicalSwitchPort) bool {
+					return t.Enabled != nil && t.Enabled[0] == true
+				})
+			},
+			prepare: func(t *testLogicalSwitchPort) {
+				t.Type = "somethingElse"
+				t.Tag = []int{6}
+			},
+			fields: []interface{}{},
+			result: []Operation{
+				{
+					Op:    opUpdate,
+					Table: "Logical_Switch_Port",
+					Row:   map[string]interface{}{"type": "somethingElse", "tag": testOvsSet(t, []int{6})},
+					Where: []interface{}{[]interface{}{"_uuid", "==", UUID{aUUID0}}},
+				},
+				{
+					Op:    opUpdate,
+					Table: "Logical_Switch_Port",
+					Row:   map[string]interface{}{"type": "somethingElse", "tag": testOvsSet(t, []int{6})},
+					Where: []interface{}{[]interface{}{"_uuid", "==", UUID{aUUID1}}},
+				},
+			},
+			err: false,
+		},
+	}
+	for _, tt := range test {
+		t.Run(fmt.Sprintf("ApiUpdate: %s", tt.name), func(t *testing.T) {
+			api := newAPI(cache)
+			cond := tt.condition(api)
+			// clean test Object
+			testObj = testLogicalSwitchPort{}
+			tt.prepare(&testObj)
+			ops, err := cond.Update(&testObj)
+			if tt.err {
+				assert.NotNil(t, err)
+			} else {
+				assert.Nil(t, err)
+				assert.Equalf(t, tt.result, ops, "Operations should match")
+			}
+		})
+	}
+}
