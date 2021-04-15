@@ -858,3 +858,125 @@ func TestAPIUpdate(t *testing.T) {
 		})
 	}
 }
+
+func TestAPIDelete(t *testing.T) {
+	cache := apiTestCache(t)
+	lspCache := map[string]Model{
+		aUUID0: &testLogicalSwitchPort{
+			UUID:        aUUID0,
+			Name:        "lsp0",
+			Type:        "someType",
+			ExternalIds: map[string]string{"foo": "bar"},
+			Enabled:     []bool{true},
+			Tag:         []int{1},
+		},
+		aUUID1: &testLogicalSwitchPort{
+			UUID:        aUUID1,
+			Name:        "lsp1",
+			Type:        "someType",
+			ExternalIds: map[string]string{"foo": "baz"},
+			Tag:         []int{1},
+			Enabled:     []bool{true},
+		},
+		aUUID2: &testLogicalSwitchPort{
+			UUID:        aUUID2,
+			Name:        "lsp2",
+			Type:        "someOtherType",
+			ExternalIds: map[string]string{"foo": "baz"},
+			Tag:         []int{1},
+		},
+	}
+	cache.cache["Logical_Switch_Port"] = &RowCache{cache: lspCache}
+
+	test := []struct {
+		name      string
+		condition func(API) ConditionalAPI
+		result    []Operation
+		err       bool
+	}{
+		{
+			name: "select by UUID",
+			condition: func(a API) ConditionalAPI {
+				return a.Where(&testLogicalSwitch{
+					UUID: aUUID0,
+				})
+			},
+			result: []Operation{
+				{
+					Op:    opDelete,
+					Table: "Logical_Switch",
+					Where: []interface{}{[]interface{}{"_uuid", "==", UUID{aUUID0}}},
+				},
+			},
+			err: false,
+		},
+		{
+			name: "select by index",
+			condition: func(a API) ConditionalAPI {
+				return a.Where(&testLogicalSwitchPort{
+					Name: "lsp1",
+				})
+			},
+			result: []Operation{
+				{
+					Op:    opDelete,
+					Table: "Logical_Switch_Port",
+					Where: []interface{}{[]interface{}{"name", "==", "lsp1"}},
+				},
+			},
+			err: false,
+		},
+		{
+			name: "select by field",
+			condition: func(a API) ConditionalAPI {
+				t := testLogicalSwitchPort{
+					Type:    "sometype",
+					Enabled: []bool{true},
+				}
+				return a.Where(&t, &t.Type)
+			},
+			result: []Operation{
+				{
+					Op:    opDelete,
+					Table: "Logical_Switch_Port",
+					Where: []interface{}{[]interface{}{"type", "==", "sometype"}},
+				},
+			},
+			err: false,
+		},
+		{
+			name: "select multiple by predicate",
+			condition: func(a API) ConditionalAPI {
+				return a.Where(func(t *testLogicalSwitchPort) bool {
+					return t.Enabled != nil && t.Enabled[0] == true
+				})
+			},
+			result: []Operation{
+				{
+					Op:    opDelete,
+					Table: "Logical_Switch_Port",
+					Where: []interface{}{[]interface{}{"_uuid", "==", UUID{aUUID0}}},
+				},
+				{
+					Op:    opDelete,
+					Table: "Logical_Switch_Port",
+					Where: []interface{}{[]interface{}{"_uuid", "==", UUID{aUUID1}}},
+				},
+			},
+			err: false,
+		},
+	}
+	for _, tt := range test {
+		t.Run(fmt.Sprintf("ApiDelete: %s", tt.name), func(t *testing.T) {
+			api := newAPI(cache)
+			cond := tt.condition(api)
+			ops, err := cond.Delete()
+			if tt.err {
+				assert.NotNil(t, err)
+			} else {
+				assert.Nil(t, err)
+				assert.Equalf(t, tt.result, ops, "Operations should match")
+			}
+		})
+	}
+}
