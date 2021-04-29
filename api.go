@@ -151,7 +151,7 @@ func (a api) Where(first interface{}, extra ...interface{}) ConditionalAPI {
 			return errorApi{ConditionError{err.Error()}}
 		}
 
-		condition, err = newPredicateCond(table, first)
+		condition, err = newPredicateCond(table, a.cache, first)
 		if err != nil {
 			return errorApi{ConditionError{err.Error()}}
 		}
