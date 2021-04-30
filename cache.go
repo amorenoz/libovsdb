@@ -294,7 +294,7 @@ func (e *eventProcessor) Run(stopCh <-chan struct{}) {
 				case updateEvent:
 					handler.OnUpdate(event.table, event.old, event.new)
 				case deleteEvent:
-					handler.OnDelete(event.table, event.new)
+					handler.OnDelete(event.table, event.old)
 				}
 			}
 			e.handlersMutex.Unlock()
