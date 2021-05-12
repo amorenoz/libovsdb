@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/ovn-org/libovsdb/ovsdb"
+	"github.com/stretchr/testify/assert"
 )
 
 const (
@@ -16,12 +17,29 @@ const (
 	defOvsSocket = "db.sock"
 )
 
-var defDB = &DBModel{name: "Open_vSwitch"}
+// ORMBridge is the simplified ORM model of the Bridge table
+type bridgeType struct {
+	UUID        string            `ovs:"_uuid"`
+	Name        string            `ovs:"name"`
+	OtherConfig map[string]string `ovs:"other_config"`
+	ExternalIds map[string]string `ovs:"external_ids"`
+	Ports       []string          `ovs:"ports"`
+	Status      map[string]string `ovs:"status"`
+}
+
+// ORMovs is the simplified ORM model of the Bridge table
+type ovsType struct {
+	UUID    string   `ovs:"_uuid"`
+	Bridges []string `ovs:"bridges"`
+}
+
+var defDB, _ = NewDBModel("Open_vSwitch", map[string]Model{
+	"Open_vSwitch": &ovsType{},
+	"Bridge":       &bridgeType{}})
 
 var cfg *Config
 
 func SetConfig() {
-
 	cfg = &Config{}
 	var ovsRunDir = os.Getenv("OVS_RUNDIR")
 	if ovsRunDir == "" {
@@ -150,54 +168,41 @@ func TestInsertTransactIntegration(t *testing.T) {
 		t.Skip("skipping integration test")
 	}
 	SetConfig()
-	if testing.Short() {
-		t.Skip()
-	}
 
 	ovs, err := Connect(cfg.Addr, defDB, nil)
 	if err != nil {
 		t.Fatalf("Failed to Connect. error: %s", err)
 	}
+	err = ovs.MonitorAll(nil)
+	assert.Nil(t, err)
 
 	// NamedUUID is used to add multiple related Operations in a single Transact operation
 	namedUUID := "gopher"
-
-	externalIds := make(map[string]string)
-	externalIds["go"] = "awesome"
-	externalIds["docker"] = "made-for-each-other"
-	oMap, err := ovsdb.NewOvsMap(externalIds)
-	if err != nil {
-		t.Fatal(err)
+	br := bridgeType{
+		UUID: namedUUID,
+		Name: bridgeName,
+		ExternalIds: map[string]string{
+			"go":     "awesome",
+			"docker": "made-for-each-other",
+		},
 	}
-	// bridge row to insert
-	bridge := make(map[string]interface{})
-	bridge["name"] = bridgeName
-	bridge["external_ids"] = oMap
 
-	// simple insert operation
-	insertOp := ovsdb.Operation{
-		Op:       "insert",
-		Table:    "Bridge",
-		Row:      bridge,
-		UUIDName: namedUUID,
-	}
+	insertOp, err := ovs.API.Create(&br)
+	assert.Nil(t, err)
 
 	// Inserting a Bridge row in Bridge table requires mutating the open_vswitch table.
-	mutateUUID := []ovsdb.UUID{{GoUUID: namedUUID}}
-	mutateSet, _ := ovsdb.NewOvsSet(mutateUUID)
-	mutation := ovsdb.NewMutation("bridges", "insert", mutateSet)
-	// hacked Condition till we get Monitor / Select working
-	condition := ovsdb.NewCondition("_uuid", "!=", ovsdb.UUID{GoUUID: "2f77b348-9768-4866-b761-89d5177ecdab"})
+	ovsRow := ovsType{}
+	mutateOp, err := ovs.API.Where(ovs.API.ConditionFromFunc(func(*ovsType) bool { return true })).
+		Mutate(&ovsRow, []Mutation{
+			{
+				Field:   &ovsRow.Bridges,
+				Mutator: ovsdb.MutateOperationInsert,
+				Value:   []string{namedUUID},
+			},
+		})
+	assert.Nil(t, err)
 
-	// simple mutate operation
-	mutateOp := ovsdb.Operation{
-		Op:        "mutate",
-		Table:     "Open_vSwitch",
-		Mutations: []interface{}{mutation},
-		Where:     []interface{}{condition},
-	}
-
-	operations := []ovsdb.Operation{insertOp, mutateOp}
+	operations := append([]ovsdb.Operation{*insertOp}, mutateOp...)
 	reply, err := ovs.Transact(operations...)
 	if err != nil {
 		t.Fatal(err)
@@ -229,10 +234,6 @@ func TestDeleteTransactIntegration(t *testing.T) {
 	}
 	SetConfig()
 
-	if testing.Short() {
-		t.Skip()
-	}
-
 	if bridgeUUID == "" {
 		t.Skip()
 	}
@@ -241,31 +242,25 @@ func TestDeleteTransactIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to Connect. error: %s", err)
 	}
+	err = ovs.MonitorAll(nil)
+	assert.Nil(t, err)
 
-	// simple delete operation
-	condition := ovsdb.NewCondition("name", "==", bridgeName)
-	deleteOp := ovsdb.Operation{
-		Op:    "delete",
-		Table: "Bridge",
-		Where: []interface{}{condition},
-	}
+	deleteOp, err := ovs.API.Where(ovs.API.ConditionFromModel(&bridgeType{Name: bridgeName})).Delete()
+	assert.Nil(t, err)
 
-	// Deleting a Bridge row in Bridge table requires mutating the open_vswitch table.
-	mutateUUID := []ovsdb.UUID{{GoUUID: bridgeUUID}}
-	mutateSet, _ := ovsdb.NewOvsSet(mutateUUID)
-	mutation := ovsdb.NewMutation("bridges", "delete", mutateSet)
-	// hacked Condition till we get Monitor / Select working
-	condition = ovsdb.NewCondition("_uuid", "!=", ovsdb.UUID{GoUUID: "2f77b348-9768-4866-b761-89d5177ecdab"})
+	ovsRow := ovsType{}
+	mutateOp, err := ovs.API.Where(ovs.API.ConditionFromFunc(func(*ovsType) bool { return true })).
+		Mutate(&ovsRow, []Mutation{
+			{
+				Field:   &ovsRow.Bridges,
+				Mutator: ovsdb.MutateOperationDelete,
+				Value:   []string{bridgeUUID},
+			},
+		})
 
-	// simple mutate operation
-	mutateOp := ovsdb.Operation{
-		Op:        "mutate",
-		Table:     "Open_vSwitch",
-		Mutations: []interface{}{mutation},
-		Where:     []interface{}{condition},
-	}
+	assert.Nil(t, err)
 
-	operations := []ovsdb.Operation{deleteOp, mutateOp}
+	operations := append(deleteOp, mutateOp...)
 	reply, err := ovs.Transact(operations...)
 	if err != nil {
 		t.Fatal(err)
@@ -316,9 +311,6 @@ func TestNotifyIntegration(t *testing.T) {
 		t.Skip("skipping integration test")
 	}
 	SetConfig()
-	if testing.Short() {
-		t.Skip()
-	}
 
 	ovs, err := Connect(cfg.Addr, defDB, nil)
 	if err != nil {
@@ -350,9 +342,6 @@ func TestRemoveNotifyIntegration(t *testing.T) {
 		t.Skip("skipping integration test")
 	}
 	SetConfig()
-	if testing.Short() {
-		t.Skip()
-	}
 
 	ovs, err := Connect(cfg.Addr, defDB, nil)
 	if err != nil {
@@ -396,9 +385,6 @@ func TestTableSchemaValidationIntegration(t *testing.T) {
 		t.Skip("skipping integration test")
 	}
 	SetConfig()
-	if testing.Short() {
-		t.Skip()
-	}
 
 	ovs, err := Connect(cfg.Addr, defDB, nil)
 	if err != nil {
@@ -427,9 +413,6 @@ func TestColumnSchemaInRowValidationIntegration(t *testing.T) {
 		t.Skip("skipping integration test")
 	}
 	SetConfig()
-	if testing.Short() {
-		t.Skip()
-	}
 
 	ovs, err := Connect(cfg.Addr, defDB, nil)
 	if err != nil {
@@ -460,9 +443,6 @@ func TestColumnSchemaInMultipleRowsValidationIntegration(t *testing.T) {
 		t.Skip("skipping integration test")
 	}
 	SetConfig()
-	if testing.Short() {
-		t.Skip()
-	}
 
 	ovs, err := Connect(cfg.Addr, defDB, nil)
 	if err != nil {
@@ -526,9 +506,6 @@ func TestMonitorCancelIntegration(t *testing.T) {
 		t.Skip("skipping integration test")
 	}
 	SetConfig()
-	if testing.Short() {
-		t.Skip()
-	}
 
 	ovs, err := Connect(cfg.Addr, defDB, nil)
 	if err != nil {
