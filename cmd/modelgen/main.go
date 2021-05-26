@@ -23,6 +23,7 @@ var (
 	outDirP  = flag.String("o", ".", "Directory where the generated files shall be stored")
 	pkgNameP = flag.String("p", "ovsmodel", "Package name")
 	dryRun   = flag.Bool("d", false, "Dry run")
+	version  string
 )
 
 func writeFile(filename string, src []byte) error {

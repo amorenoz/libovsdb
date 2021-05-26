@@ -7,7 +7,8 @@ local: install-deps build-local fmt lint test-local bench-local
 prebuild-local:
 	@echo "+ $@"
 	@mkdir -p bin
-	@go build -v -o ./bin ./cmd/modelgen
+	@VERSION=$$(git describe --tags HEAD 2>/dev/null || echo "unknown"); echo $$VERSION; \
+		go build -ldflags "-X main.version=$${VERSION}" -o ./bin ./cmd/modelgen
 	@curl -o example/play_with_ovs/ovs.ovsschema https://raw.githubusercontent.com/openvswitch/ovs/v2.15.0/vswitchd/vswitch.ovsschema
 	@go generate -v ./...
 
