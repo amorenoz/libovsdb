@@ -14,7 +14,7 @@ import (
 const (
 	opInsert string = "insert"
 	opMutate string = "mutate"
-	opUpdate string = "insert"
+	opUpdate string = "update"
 	opDelete string = "delete"
 )
 
